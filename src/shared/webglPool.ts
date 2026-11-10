@@ -14,6 +14,8 @@ export interface WebglCandidate {
   focused?: boolean;
   /** Last output (performance.now()). */
   outputAt?: number;
+  /** When its terminal was created (performance.now()); a terminal never shown counts its parked time from here. */
+  createdAt?: number;
   /** When its context was last created or given back (performance.now()). */
   changedAt?: number;
   /** No new context before this time (a lost context backs off). */
@@ -29,9 +31,15 @@ export interface WebglCandidate {
  */
 export const WEBGL_PARKED_MS = 5 * 60_000;
 
-/** A parked terminal may hold a context: its grid is next to the shown one, or it was shown less than WEBGL_PARKED_MS ago. */
+/**
+ * A parked terminal may hold a context: its grid is next to the shown one, or it was shown (a terminal never shown: created)
+ * less than WEBGL_PARKED_MS ago. So the grids of a fresh start get their contexts in idle time and their first visit costs
+ * no context creation, and grids nobody looks at give them back after WEBGL_PARKED_MS like any other.
+ */
 function mayHoldParked(c: WebglCandidate, now: number): boolean {
-  return c.keep === true || (c.shownAt > 0 && now - c.shownAt < WEBGL_PARKED_MS);
+  if (c.keep === true) return true;
+  const since = c.shownAt > 0 ? c.shownAt : c.createdAt;
+  return since !== undefined && since > 0 && now - since < WEBGL_PARKED_MS;
 }
 
 /** Parked terminals whose context goes back now: not shown for WEBGL_PARKED_MS (or never) and not in a grid next to the shown one. */

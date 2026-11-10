@@ -209,6 +209,15 @@ describe('WebGL context pool', () => {
     expect(pickPrewarm([c('next', false, false, kept)], 64, LATER)).toBe('next');
   });
 
+  it('a terminal never shown counts from its creation: prewarmed in its first WEBGL_PARKED_MS, given back after', () => {
+    expect(pickPrewarm([c('fresh', false, false, { createdAt: LATER - 1000 })], 64, LATER)).toBe('fresh');
+    expect(pickPrewarm([c('old', false, false, { createdAt: LATER - WEBGL_PARKED_MS })], 64, LATER)).toBeNull();
+    const held = [c('fresh', true, false, { createdAt: LATER - 1000 }), c('old', true, false, { createdAt: LATER - WEBGL_PARKED_MS })];
+    expect(pickStale(held, LATER)).toEqual(['old']);
+    // Once shown, the shown time counts, not the creation.
+    expect(pickStale([c('seen', true, false, { createdAt: LATER - 1000, shownAt: LATER - WEBGL_PARKED_MS })], LATER)).toEqual(['seen']);
+  });
+
   it('parked terminals not shown for WEBGL_PARKED_MS give their context back, unless their grid is next to the shown one', () => {
     const all = [
       c('shown', true, true, { shownAt: LATER - WEBGL_PARKED_MS - 1 }),

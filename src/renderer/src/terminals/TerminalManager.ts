@@ -65,6 +65,8 @@ interface Entry {
   webgl: WebglAddon | null;
   /** When the terminal was last shown (LRU order of the WebGL contexts kept by parked terminals). */
   shownAt: number;
+  /** When the terminal was created (a never shown one may hold a prewarmed context for WEBGL_PARKED_MS from here). */
+  createdAt: number;
   /** Last live output (performance.now()): busy cells get a WebGL context before quiet ones. */
   outputAt: number | undefined;
   /** When the WebGL context was last created, given up or lost (hysteresis, webglPool.ts). */
@@ -512,7 +514,7 @@ class TerminalManager {
     this.skipHiddenSelectionRedraws(term);
 
     const entry: Entry = {
-      id: cellId, term, fit, webgl: null, shownAt: 0, outputAt: undefined, webglChangedAt: undefined, webglBlockedUntil: undefined, webglGl: null, webglGrantedAt: -Infinity, webglLosses: 0, host, tracker: new StatusTracker(), win32: false, agent: opts.agent,
+      id: cellId, term, fit, webgl: null, shownAt: 0, createdAt: performance.now(), outputAt: undefined, webglChangedAt: undefined, webglBlockedUntil: undefined, webglGl: null, webglGrantedAt: -Infinity, webglLosses: 0, host, tracker: new StatusTracker(), win32: false, agent: opts.agent,
       codex: opts.codex === true, scanner: new FailureScanner(), guard: new MouseFloodGuard(), infer: new AgentInference(window.mc.platform === 'win32' && opts.remote !== true), attachedTo: null, resizeObs: null, replaying: 0, replayMarks: null, refitAfterReplay: false, ptyLive: false, lastSize: { cols: term.cols, rows: term.rows },
       parkedSelection: null, applySelection: null, remote: opts.remote === true, addon: null, askEpoch: 0,
       unsyncViewport: coalesceViewportSync(term, host, undefined, () => !this.windowShown),
@@ -872,7 +874,7 @@ class TerminalManager {
   private webglCandidates(): WebglCandidate[] {
     const focused = document.activeElement;
     return [...this.entries.values()].map((o) => ({
-      id: o.id, hasWebgl: o.webgl !== null, attached: o.attachedTo !== null, shownAt: o.shownAt, focused: focused !== null && focused === o.term.textarea,
+      id: o.id, hasWebgl: o.webgl !== null, attached: o.attachedTo !== null, shownAt: o.shownAt, createdAt: o.createdAt, focused: focused !== null && focused === o.term.textarea,
       outputAt: o.outputAt, changedAt: o.webglChangedAt, blockedUntil: o.webglBlockedUntil, keep: this.neighbours.has(o.id),
     }));
   }
