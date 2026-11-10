@@ -54,6 +54,7 @@ pub fn spawn(launch: &Launch, on_data: DataFn, on_exit: ExitFn) -> io::Result<Ar
         rows: launch.rows,
         flags: 0,
         job: true,
+        cmdline: None,
     };
     Ok(Arc::new(WinTerm(Pty::spawn(api, &opts, on_data, on_exit)?)))
 }

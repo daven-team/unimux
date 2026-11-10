@@ -20,7 +20,11 @@
 //! - `ClosePseudoConsole` runs on its own thread while the reader keeps draining the output pipe, even when the flow gate has
 //!   paused it: OpenConsole flushes its last frame on close and blocks while nobody reads, which deadlocks a close done on
 //!   the reader thread or with a paused reader;
-//! - input is written by a writer thread: a write to a console that is blocked on a full output pipe would block the caller.
+//! - input is written by a writer thread: a write to a console that is blocked on a full output pipe would block the caller;
+//! - a terminal may start a second program in the same pseudoconsole once its first one ended ([`Pty::spawn_then`]: an agent
+//!   CLI started without a shell, then the user's shell). The pseudoconsole is released only after that hand-over, so
+//!   OpenConsole stays for the second program; a kill before it skips the second program. The exit reported is the last
+//!   program's, and the whole chain is one job.
 
 use std::ffi::c_void;
 use std::fs::File;
@@ -28,7 +32,7 @@ use std::io::{self, Read, Write};
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
@@ -211,7 +215,13 @@ pub struct SpawnOptions {
     pub flags: u32,
     /// Put the child into its own Job Object (tree kill on [`Pty::kill`]; no kill-on-close).
     pub job: bool,
+    /// The complete command line instead of `file` + `args` with node-pty's quoting (a `cmd.exe /s /c "..."` line).
+    pub cmdline: Option<String>,
 }
+
+/// What starts in the same pseudoconsole once the first program ended: gets its exit code, answers the next program (only
+/// `file`, `args`, `cmdline`, `cwd` and `env` are used) or None to end the terminal.
+pub type ThenFn = Box<dyn FnOnce(u32) -> Option<SpawnOptions> + Send>;
 
 impl SpawnOptions {
     pub fn new(file: impl Into<String>, args: &[&str]) -> Self {
@@ -224,6 +234,7 @@ impl SpawnOptions {
             rows: 24,
             flags: 0,
             job: true,
+            cmdline: None,
         }
     }
 }
@@ -284,9 +295,12 @@ impl Gate {
 struct Shared {
     api: &'static ConptyApi,
     hpc: Mutex<Option<isize>>,
-    process: OwnedHandle,
-    pid: u32,
+    /// The program running now (the second one after a hand-over, see [`Pty::spawn_then`]).
+    process: Mutex<Arc<OwnedHandle>>,
+    pid: AtomicU32,
     job: Option<Job>,
+    /// The program to start once the first one ended; the pseudoconsole is released after it started.
+    then: Mutex<Option<ThenFn>>,
     gate: Gate,
     exit: Mutex<Option<u32>>,
     exit_cv: Condvar,
@@ -360,10 +374,43 @@ impl Shared {
             return;
         }
         st.terminated = true;
+        let process = self.process.lock().clone();
         // SAFETY: a valid handle owned by `self`.
         unsafe {
-            let _ = TerminateProcess(HANDLE(self.process.as_raw_handle()), 1);
+            let _ = TerminateProcess(HANDLE(process.as_raw_handle()), 1);
         }
+    }
+
+    /// The first program ended with `code`: starts the next one in the same pseudoconsole (unless a kill came first or there
+    /// is none), then releases the pseudoconsole. True when a next program runs.
+    fn hand_over(&self, code: u32) -> bool {
+        let Some(then) = self.then.lock().take() else { return false };
+        let next = if self.kill_state.lock().kill { None } else { then(code) };
+        let started = next.is_some_and(|opts| {
+            // Under the kill lock: a kill either came before (no start) or sees the new process (and terminates it).
+            let st = self.kill_state.lock();
+            if st.kill {
+                return false;
+            }
+            let hpc = self.hpc.lock();
+            let Some(hpc) = *hpc else { return false };
+            // SAFETY: a live pseudoconsole (the lock keeps close from taking it meanwhile).
+            match unsafe { start_process(&opts, hpc, self.job.as_ref()) } {
+                Ok((process, pid)) => {
+                    *self.process.lock() = Arc::new(process);
+                    self.pid.store(pid, Ordering::SeqCst);
+                    true
+                }
+                Err(_) => false,
+            }
+        });
+        if let Some(release) = self.api.release
+            && let Some(hpc) = *self.hpc.lock()
+        {
+            // SAFETY: a live pseudoconsole; Release only drops this side's reference (the close still comes later).
+            let _ = unsafe { release(hpc) };
+        }
+        started
     }
 
     /// Ends everything in the terminal's job (1.1.4's `taskkill /T`): only for a terminal that did not end in time.
@@ -442,7 +489,19 @@ pub type ExitFn = Box<dyn FnOnce(u32) + Send>;
 impl Pty {
     /// Starts `opts` in a new pseudoconsole. `on_data` gets every chunk of output on the reader thread; `on_exit` gets the
     /// exit code once the process ended AND its output was fully read (output after exit is never lost).
-    pub fn spawn(api: &'static ConptyApi, opts: &SpawnOptions, mut on_data: DataFn, on_exit: ExitFn) -> io::Result<Pty> {
+    pub fn spawn(api: &'static ConptyApi, opts: &SpawnOptions, on_data: DataFn, on_exit: ExitFn) -> io::Result<Pty> {
+        Self::spawn_then(api, opts, None, on_data, on_exit)
+    }
+
+    /// [`Pty::spawn`], and once the program ended `then` may start the next one in the same pseudoconsole (same screen,
+    /// same input, same job). `on_exit` then gets the last program's exit code.
+    pub fn spawn_then(
+        api: &'static ConptyApi,
+        opts: &SpawnOptions,
+        then: Option<ThenFn>,
+        mut on_data: DataFn,
+        on_exit: ExitFn,
+    ) -> io::Result<Pty> {
         let size = Coord { x: opts.cols.max(2) as i16, y: opts.rows.max(1) as i16 };
         allow_ctrl_c_in_children();
         let (mut in_read, mut in_write, mut out_read, mut out_write) =
@@ -468,99 +527,27 @@ impl Pty {
             drop(out_write);
             let close_hpc = |hpc: isize| (api.close)(hpc);
 
-            let mut attr_size = 0usize;
-            let _ = InitializeProcThreadAttributeList(None, 1, None, &mut attr_size);
-            let mut attr_buf = vec![0u8; attr_size];
-            let attrs = LPPROC_THREAD_ATTRIBUTE_LIST(attr_buf.as_mut_ptr() as *mut c_void);
-            if let Err(e) = InitializeProcThreadAttributeList(Some(attrs), 1, None, &mut attr_size) {
-                close_hpc(hpc);
-                return Err(io::Error::other(e));
-            }
-            if let Err(e) = UpdateProcThreadAttribute(
-                attrs,
-                0,
-                PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE as usize,
-                Some(hpc as *const c_void),
-                std::mem::size_of::<isize>(),
-                None,
-                None,
-            ) {
-                DeleteProcThreadAttributeList(attrs);
-                close_hpc(hpc);
-                return Err(io::Error::other(e));
-            }
-
-            let mut si = STARTUPINFOEXW::default();
-            si.StartupInfo.cb = std::mem::size_of::<STARTUPINFOEXW>() as u32;
-            // Like node-pty: no std handles of ours reach the child, the console is its only stdio.
-            si.StartupInfo.dwFlags |= STARTF_USESTDHANDLES;
-            si.lpAttributeList = attrs;
-
-            let mut cmdline: Vec<u16> =
-                args_to_command_line(&opts.file, &opts.args).encode_utf16().chain(std::iter::once(0)).collect();
-            let env_block: Option<Vec<u16>> = opts.env.as_ref().map(|env| {
-                let mut block: Vec<u16> = Vec::new();
-                for (k, v) in env {
-                    block.extend(format!("{k}={v}").encode_utf16());
-                    block.push(0);
-                }
-                if env.is_empty() {
-                    block.push(0);
-                }
-                block.push(0);
-                block
-            });
-            let cwd = opts.cwd.as_ref().map(|c| wide(c.as_os_str()));
-            let mut flags = EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT;
-            if job.is_some() {
-                flags |= CREATE_SUSPENDED;
-            }
-            let mut pi = PROCESS_INFORMATION::default();
-            let created = CreateProcessW(
-                PCWSTR::null(),
-                Some(PWSTR(cmdline.as_mut_ptr())),
-                None,
-                None,
-                false,
-                flags,
-                env_block.as_ref().map(|b| b.as_ptr() as *const c_void),
-                cwd.as_ref().map(|c| PCWSTR(c.as_ptr())).unwrap_or(PCWSTR::null()),
-                &si.StartupInfo,
-                &mut pi,
-            );
-            DeleteProcThreadAttributeList(attrs);
-            drop(attr_buf);
-            if let Err(e) = created {
-                close_hpc(hpc);
-                return Err(io::Error::other(format!("CreateProcess {}: {e}", opts.file)));
-            }
-            let process = OwnedHandle::from_raw_handle(pi.hProcess.0 as RawHandle);
-            if let Some(job) = &job {
-                if let Err(e) = AssignProcessToJobObject(job.0, pi.hProcess) {
-                    let _ = TerminateProcess(pi.hProcess, 1);
-                    let _ = CloseHandle(pi.hThread);
+            let (process, pid) = match start_process(opts, hpc, job.as_ref()) {
+                Ok(started) => started,
+                Err(e) => {
                     close_hpc(hpc);
-                    return Err(io::Error::other(format!("AssignProcessToJobObject: {e}")));
+                    return Err(e);
                 }
-                if ResumeThread(pi.hThread) == u32::MAX {
-                    let e = io::Error::last_os_error();
-                    let _ = TerminateProcess(pi.hProcess, 1);
-                    let _ = CloseHandle(pi.hThread);
-                    close_hpc(hpc);
-                    return Err(io::Error::other(format!("ResumeThread: {e}")));
-                }
-            }
-            let _ = CloseHandle(pi.hThread);
-            if let Some(release) = api.release {
+            };
+            // A next program needs the pseudoconsole after this one ended: released once it started (Shared::hand_over).
+            if then.is_none()
+                && let Some(release) = api.release
+            {
                 let _ = release(hpc);
             }
 
             let shared = Arc::new(Shared {
                 api,
                 hpc: Mutex::new(Some(hpc)),
-                process,
-                pid: pi.dwProcessId,
+                process: Mutex::new(Arc::new(process)),
+                pid: AtomicU32::new(pid),
                 job,
+                then: Mutex::new(then),
                 gate: Gate::default(),
                 exit: Mutex::new(None),
                 exit_cv: Condvar::new(),
@@ -599,9 +586,16 @@ impl Pty {
             std::thread::Builder::new()
                 .name("conpty-wait".into())
                 .spawn(move || {
-                    WaitForSingleObject(HANDLE(waiter.process.as_raw_handle()), INFINITE);
-                    let mut code = 0u32;
-                    let _ = GetExitCodeProcess(HANDLE(waiter.process.as_raw_handle()), &mut code);
+                    // The exit of the last program: a hand-over (Pty::spawn_then) waits for the next one.
+                    let code = loop {
+                        let process = waiter.process.lock().clone();
+                        WaitForSingleObject(HANDLE(process.as_raw_handle()), INFINITE);
+                        let mut code = 0u32;
+                        let _ = GetExitCodeProcess(HANDLE(process.as_raw_handle()), &mut code);
+                        if !waiter.hand_over(code) {
+                            break code;
+                        }
+                    };
                     *waiter.exit.lock() = Some(code);
                     waiter.exit_cv.notify_all();
                     // A reader paused by flow control reads again (and is never paused again): the output the console
@@ -652,8 +646,9 @@ impl Pty {
         }
     }
 
+    /// The pid of the program running now (the next one once a [`Pty::spawn_then`] hand-over happened).
     pub fn pid(&self) -> u32 {
-        self.shared.pid
+        self.shared.pid.load(Ordering::SeqCst)
     }
 
     /// A handle that pauses / resumes the reader (for flow control set up before the Pty existed).
@@ -793,6 +788,93 @@ impl Drop for Pty {
             self.input.lock().take();
             self.shared.close_pseudoconsole();
         }
+    }
+}
+
+/// Starts one program attached to the pseudoconsole `hpc` (created suspended and put into `job` first when there is one).
+///
+/// # Safety
+/// `hpc` must be a live pseudoconsole.
+unsafe fn start_process(opts: &SpawnOptions, hpc: isize, job: Option<&Job>) -> io::Result<(OwnedHandle, u32)> {
+    // SAFETY: the attribute list lives in `attr_buf` until it is deleted; every handle is owned or closed on each path.
+    unsafe {
+        let mut attr_size = 0usize;
+        let _ = InitializeProcThreadAttributeList(None, 1, None, &mut attr_size);
+        let mut attr_buf = vec![0u8; attr_size];
+        let attrs = LPPROC_THREAD_ATTRIBUTE_LIST(attr_buf.as_mut_ptr() as *mut c_void);
+        InitializeProcThreadAttributeList(Some(attrs), 1, None, &mut attr_size).map_err(io::Error::other)?;
+        if let Err(e) = UpdateProcThreadAttribute(
+            attrs,
+            0,
+            PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE as usize,
+            Some(hpc as *const c_void),
+            std::mem::size_of::<isize>(),
+            None,
+            None,
+        ) {
+            DeleteProcThreadAttributeList(attrs);
+            return Err(io::Error::other(e));
+        }
+
+        let mut si = STARTUPINFOEXW::default();
+        si.StartupInfo.cb = std::mem::size_of::<STARTUPINFOEXW>() as u32;
+        // Like node-pty: no std handles of ours reach the child, the console is its only stdio.
+        si.StartupInfo.dwFlags |= STARTF_USESTDHANDLES;
+        si.lpAttributeList = attrs;
+
+        let line = opts.cmdline.clone().unwrap_or_else(|| args_to_command_line(&opts.file, &opts.args));
+        let mut cmdline: Vec<u16> = line.encode_utf16().chain(std::iter::once(0)).collect();
+        let env_block: Option<Vec<u16>> = opts.env.as_ref().map(|env| {
+            let mut block: Vec<u16> = Vec::new();
+            for (k, v) in env {
+                block.extend(format!("{k}={v}").encode_utf16());
+                block.push(0);
+            }
+            if env.is_empty() {
+                block.push(0);
+            }
+            block.push(0);
+            block
+        });
+        let cwd = opts.cwd.as_ref().map(|c| wide(c.as_os_str()));
+        let mut flags = EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT;
+        if job.is_some() {
+            flags |= CREATE_SUSPENDED;
+        }
+        let mut pi = PROCESS_INFORMATION::default();
+        let created = CreateProcessW(
+            PCWSTR::null(),
+            Some(PWSTR(cmdline.as_mut_ptr())),
+            None,
+            None,
+            false,
+            flags,
+            env_block.as_ref().map(|b| b.as_ptr() as *const c_void),
+            cwd.as_ref().map(|c| PCWSTR(c.as_ptr())).unwrap_or(PCWSTR::null()),
+            &si.StartupInfo,
+            &mut pi,
+        );
+        DeleteProcThreadAttributeList(attrs);
+        drop(attr_buf);
+        if let Err(e) = created {
+            return Err(io::Error::other(format!("CreateProcess {}: {e}", opts.file)));
+        }
+        let process = OwnedHandle::from_raw_handle(pi.hProcess.0 as RawHandle);
+        if let Some(job) = job {
+            if let Err(e) = AssignProcessToJobObject(job.0, pi.hProcess) {
+                let _ = TerminateProcess(pi.hProcess, 1);
+                let _ = CloseHandle(pi.hThread);
+                return Err(io::Error::other(format!("AssignProcessToJobObject: {e}")));
+            }
+            if ResumeThread(pi.hThread) == u32::MAX {
+                let e = io::Error::last_os_error();
+                let _ = TerminateProcess(pi.hProcess, 1);
+                let _ = CloseHandle(pi.hThread);
+                return Err(io::Error::other(format!("ResumeThread: {e}")));
+            }
+        }
+        let _ = CloseHandle(pi.hThread);
+        Ok((process, pi.dwProcessId))
     }
 }
 

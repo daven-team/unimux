@@ -25,7 +25,15 @@ export function startClear(shell: ShellKind = 'pwsh'): string {
   return 'Clear-Host; ';
 }
 
-const CLEAR_TOKENS = (['pwsh', 'cmd', 'bash'] as const).map((s) => startClear(s).trim());
+/**
+ * 1.2.0, Windows: an agent CLI started as the terminal's own process (no shell, no launch line, no clear) begins its output
+ * with OSC AGENT_START_OSC;AGENT_START_PAYLOAD (src-tauri unimux-pty shell_integration.rs): the screen is empty and the CLI
+ * comes next, what the clear of the launch line says otherwise.
+ */
+export const AGENT_START_OSC = 6973;
+export const AGENT_START_PAYLOAD = 'agent-start';
+
+const CLEAR_TOKENS =(['pwsh', 'cmd', 'bash'] as const).map((s) => startClear(s).trim());
 
 /** The launch line (its clear prefix) is among these screen lines (wrapped rows already joined). */
 export function showsLaunchLine(lines: readonly string[]): boolean {

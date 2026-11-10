@@ -225,9 +225,130 @@ pub fn integrated_launch(
     (spec.launch, spec.env)
 }
 
+// ── an agent CLI started without a shell (Windows) ───────────────────────────
+//
+// The CLI runs as the terminal's own process and the shell starts in the same terminal once it ended (manager.rs,
+// `SpawnRequest::agent`). What the shell and the launch line used to write around the CLI is written here instead.
+
+/// Tells the renderer the agent's start began (src/shared/startScreen.ts `AGENT_START_OSC`): what the launch line's clear
+/// told it before (the screen is empty, the CLI comes next).
+pub const AGENT_START_OSC: &[u8] = b"\x1b]6973;agent-start\x07";
+
+/// The PowerShell expression of the launch line's reset tail (unimux-agents launch `with_reset_tail`): mouse tracking, the
+/// mouse encodings, bracketed paste and the kitty keyboard flags off (1004 is ConPTY's and never cleared).
+pub const INPUT_RESET_PS: &str = "[char]27+'[?1000;1002;1003;1005;1006;1015;2004l'+[char]27+'[<u'";
+
+fn integration_on(env: &[(String, String)]) -> bool {
+    env_get(env, SHELL_INTEGRATION_ENV) != Some("0")
+}
+
+/// What the terminal of an agent started without a shell gets before the CLI's first output: the prompt marks the shell
+/// wrote before the launch line was typed (PowerShell: D;0 A B, and C once the line was accepted; cmd: D A B in its PROMPT),
+/// then [`AGENT_START_OSC`]. The status of the cell reads the CLI's launch and end from these marks as before.
+pub fn agent_start_marks(kind: ShellKind, env: &[(String, String)]) -> Vec<u8> {
+    let mut out = Vec::new();
+    if integration_on(env) {
+        match kind {
+            ShellKind::Pwsh | ShellKind::Powershell => {
+                out.extend_from_slice(b"\x1b]133;D;0\x07\x1b]133;A\x07\x1b]133;B\x07\x1b]133;C\x07");
+            }
+            ShellKind::Cmd => out.extend_from_slice(b"\x1b]133;D\x1b\\\x1b]133;A\x1b\\\x1b]133;B\x1b\\"),
+            ShellKind::Zsh | ShellKind::Bash => {}
+        }
+    }
+    out.extend_from_slice(AGENT_START_OSC);
+    out
+}
+
+/// The shell that starts in the terminal once the agent CLI ended with `code`: the launch `shell` (from [`resolve_shell`],
+/// `env` the cell's) with what the launch line's reset tail did after the CLI: the input modes off, and in PowerShell the
+/// CLI's exit code in `$LASTEXITCODE` and `$__unimuxExit` (the prompt's D mark carries it once). PowerShell then wraps its
+/// prompt as usual; cmd gets `/k` with the tail's command and its prompt marks from `env` ([`integrated_launch`]).
+/// Returns the launch and, for cmd, the complete command line.
+///
+/// [`resolve_shell`]: crate::shell::resolve_shell
+pub fn after_agent_launch(kind: ShellKind, shell: &Launch, env: &[(String, String)], code: i32) -> (Launch, Option<String>) {
+    if kind == ShellKind::Cmd {
+        let file = if shell.file.contains(' ') { format!("\"{}\"", shell.file) } else { shell.file.clone() };
+        let line =
+            format!("{file} /k powershell -NoProfile -NonInteractive -Command \"[Console]::Write({INPUT_RESET_PS})\" 2>nul");
+        return (shell.clone(), Some(line));
+    }
+    let prelude = format!("$global:LASTEXITCODE = {code}; $global:__unimuxExit = {code}; [Console]::Write({INPUT_RESET_PS})");
+    let script = if integration_on(env) { format!("{prelude}\n{POWERSHELL_SCRIPT}") } else { prelude };
+    let mut args = shell.args.clone();
+    args.extend(["-NoExit".to_string(), "-EncodedCommand".to_string(), encode_power_shell(&script)]);
+    (Launch { file: shell.file.clone(), args }, None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn decode_power_shell(b64: &str) -> String {
+        let mut bytes = Vec::new();
+        let (mut acc, mut bits) = (0u32, 0u32);
+        for c in b64.bytes().filter(|c| *c != b'=') {
+            acc = (acc << 6) | B64.iter().position(|b| *b == c).unwrap() as u32;
+            bits += 6;
+            if bits >= 8 {
+                bits -= 8;
+                bytes.push((acc >> bits) as u8);
+            }
+        }
+        let units: Vec<u16> = bytes.chunks(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        String::from_utf16(&units).unwrap()
+    }
+
+    #[test]
+    fn the_reset_after_an_agent_is_the_launch_lines_reset_tail() {
+        // The same expression the typed line's tail writes (unimux-agents launch with_reset_tail), for PowerShell and cmd.
+        use unimux_agents::launch::{Shell, with_reset_tail};
+        assert!(with_reset_tail("x", Shell::Pwsh, None).contains(&format!("[Console]::Write({INPUT_RESET_PS})")));
+        let cmd_tail = with_reset_tail("x", Shell::Cmd, None);
+        let cmd_after = format!("powershell -NoProfile -NonInteractive -Command \"[Console]::Write({INPUT_RESET_PS})\" 2>nul");
+        assert!(cmd_tail.ends_with(&cmd_after), "{cmd_tail}");
+        let shell = Launch::new("cmd.exe", &[]);
+        let (launch, line) = after_agent_launch(ShellKind::Cmd, &shell, &[], 3);
+        assert_eq!(launch, shell);
+        assert_eq!(line.unwrap(), format!("cmd.exe /k {cmd_after}"));
+    }
+
+    #[test]
+    fn powershell_after_an_agent_keeps_its_exit_code_and_wraps_the_prompt() {
+        let shell = Launch::new("C:\\pwsh.exe", &["-NoLogo"]);
+        let (launch, line) = after_agent_launch(ShellKind::Pwsh, &shell, &[], -1073741510);
+        assert_eq!(line, None);
+        assert_eq!(launch.file, "C:\\pwsh.exe");
+        assert_eq!(launch.args[..3], ["-NoLogo", "-NoExit", "-EncodedCommand"]);
+        let script = decode_power_shell(&launch.args[3]);
+        assert!(script.starts_with(
+            "$global:LASTEXITCODE = -1073741510; $global:__unimuxExit = -1073741510; [Console]::Write([char]27+'[?1000;"
+        ));
+        assert!(script.ends_with(POWERSHELL_SCRIPT));
+        // Shell integration off: only the tail's part.
+        let off = env(&[(SHELL_INTEGRATION_ENV, "0")]);
+        let (launch, _) = after_agent_launch(ShellKind::Powershell, &shell, &off, 0);
+        let script = decode_power_shell(&launch.args[3]);
+        assert!(!script.contains("__unimuxShell") && script.contains("$global:__unimuxExit = 0;"));
+    }
+
+    #[test]
+    fn the_start_marks_are_the_ones_the_shell_wrote_before_the_cli() {
+        assert_eq!(
+            agent_start_marks(ShellKind::Pwsh, &[]),
+            b"\x1b]133;D;0\x07\x1b]133;A\x07\x1b]133;B\x07\x1b]133;C\x07\x1b]6973;agent-start\x07"
+        );
+        assert_eq!(
+            agent_start_marks(ShellKind::Cmd, &[]),
+            b"\x1b]133;D\x1b\\\x1b]133;A\x1b\\\x1b]133;B\x1b\\\x1b]6973;agent-start\x07"
+        );
+        // cmd's marks are the ones its PROMPT writes.
+        let prompt = cmd_prompt(None).replace("$E", "\x1b");
+        assert!(prompt.starts_with("\x1b]133;D\x1b\\\x1b]133;A\x1b\\"));
+        let off = env(&[(SHELL_INTEGRATION_ENV, "0")]);
+        assert_eq!(agent_start_marks(ShellKind::Powershell, &off), AGENT_START_OSC);
+    }
 
     fn env(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
         pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()

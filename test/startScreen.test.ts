@@ -1,8 +1,10 @@
 // 1.1.5: the start card of an agent cell (shared/startScreen.ts) and the clear that starts the launch line.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildLaunchCommand, DEFAULT_PROFILES } from '../src/shared/profiles';
 import {
-  showsLaunchLine, START_FAIL_WINDOW_MS, START_SETTLE_MS, START_TAIL_LINES, START_TIMEOUT_MS, startClear, startOutput, StartWatch,
+  AGENT_START_OSC, AGENT_START_PAYLOAD, showsLaunchLine, START_FAIL_WINDOW_MS, START_SETTLE_MS, START_TAIL_LINES, START_TIMEOUT_MS, startClear, startOutput, StartWatch,
 } from '../src/shared/startScreen';
 
 const P = Object.fromEntries(DEFAULT_PROFILES.map((p) => [p.cli, p]));
@@ -157,5 +159,30 @@ describe('StartWatch', () => {
     expect(w.awaitingClear).toBe(true);
     expect(w.stop()).toBe(true);
     expect(w.stop()).toBe(false);
+  });
+});
+
+describe('an agent started without a shell (1.2.0, Windows)', () => {
+  it('is announced by the mark the pty writes before the CLI, which this side knows by the same number and payload', () => {
+    const rust = readFileSync(join(__dirname, '..', 'src-tauri', 'crates', 'unimux-pty', 'src', 'shell_integration.rs'), 'utf8');
+    expect(rust).toContain(`b"\\x1b]${AGENT_START_OSC};${AGENT_START_PAYLOAD}\\x07"`);
+  });
+
+  it('goes from the mark (no launch line, no clear) to the CLI drawing, then up; a prompt back still ends it', () => {
+    const w = new StartWatch();
+    w.begin(0, false);
+    // What the mark handler does: the screen is empty, the CLI comes next.
+    w.cleared(5, true);
+    expect(w.awaitingOutput).toBe(true);
+    w.output(100, true);
+    expect(w.tick(100 + START_SETTLE_MS)).toBe(true);
+    expect(w.screen).toBeNull();
+    const failed = new StartWatch();
+    failed.begin(0, false);
+    failed.cleared(5, true);
+    failed.output(50, true);
+    failed.shellMark('D', 1, 300, lines());
+    failed.shellMark('A', undefined, 300, lines('Error: x'));
+    expect(failed.screen).toMatchObject({ phase: 'failed', code: 1, errorLines: ['Error: x'] });
   });
 });

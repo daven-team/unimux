@@ -772,3 +772,115 @@ fn the_supervised_actor_kills_the_terminals_on_a_crash_and_restarts() {
     assert!(!alive(pid));
     sup.stop();
 }
+
+// ── an agent CLI started without a shell (Windows) ───────────────────────────
+
+/// A one-shot hook server: the first request's head.
+#[cfg(windows)]
+fn hook_server() -> (String, mpsc::Receiver<String>) {
+    use std::io::{Read as _, Write as _};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://127.0.0.1:{}/x/cell-1/0123456789abcdef", listener.local_addr().unwrap().port());
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let Ok((mut s, _)) = listener.accept() else { return };
+        let mut buf = vec![0u8; 2048];
+        let n = s.read(&mut buf).unwrap_or(0);
+        let _ = s.write_all(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n");
+        let _ = tx.send(String::from_utf8_lossy(&buf[..n]).into_owned());
+    });
+    (url, rx)
+}
+
+#[cfg(windows)]
+fn agent_req(id: &str, cwd: &std::path::Path, script: &str, exit_url: Option<String>) -> SpawnRequest {
+    let mut r = req(id, cwd, ShellKind::Cmd);
+    r.cell_id = Some(id.to_string());
+    r.command = Some("echo typed-launch-line".into());
+    r.agent =
+        Some(unimux_pty::manager::AgentLaunch { file: "cmd.exe".into(), cmdline: format!("cmd.exe /d /c {script}"), exit_url });
+    r
+}
+
+#[cfg(windows)]
+#[test]
+fn an_agent_without_a_shell_hands_its_terminal_to_the_shell_when_it_ends() {
+    let sink = Sink::new();
+    let m = manager(&sink);
+    let dir = scratch();
+    let (url, posted) = hook_server();
+    let pid = m
+        .spawn(agent_req("ag", dir.path(), "echo agent-%MC_CELL_ID%-ran& ping -n 2 127.0.0.1 >nul& exit /b 7", Some(url)))
+        .unwrap();
+    assert!(sink.wait_text("ag", Duration::from_secs(10), "agent-ag-ran"), "{:?}", sink.text("ag"));
+    // The marks the shell wrote before the launch line come first; the line itself is never typed.
+    let text = sink.text("ag");
+    assert!(text.starts_with("\x1b]133;D\x1b\\\x1b]133;A\x1b\\\x1b]133;B\x1b\\\x1b]6973;agent-start\x07"), "{text:?}");
+    // The exit code reaches the hook server as the tail posted it, then cmd's prompt (with its marks) comes back.
+    let head = posted.recv_timeout(Duration::from_secs(10)).expect("no exit post");
+    assert!(head.starts_with("POST /x/cell-1/0123456789abcdef/7 HTTP/1.1\r\n"), "{head}");
+    assert!(sink.wait(Duration::from_secs(15), |s| {
+        let t = String::from_utf8_lossy(&s.out["ag"]).into_owned();
+        t.split_once("agent-ag-ran").is_some_and(|(_, after)| after.contains("\x1b]133;A") && after.contains('>'))
+    }));
+    assert!(!sink.text("ag").contains("typed-launch-line"));
+    assert!(sink.exit_of("ag").is_none(), "the terminal goes on with the shell");
+    let shell_pid = m.pid("ag").unwrap();
+    assert_ne!(shell_pid, pid);
+    assert!(!alive(pid) && alive(shell_pid));
+    // The shell works in the same terminal, and its end is the terminal's.
+    m.write("ag", b"echo shell-%OS:~0,0%works\r");
+    assert!(sink.wait_text("ag", Duration::from_secs(10), "shell-works"));
+    m.write("ag", b"exit 5\r");
+    assert_eq!(sink.wait_exit("ag", Duration::from_secs(10)).map(|e| e.0), Some(5));
+    assert!(!alive(shell_pid));
+}
+
+#[cfg(windows)]
+#[test]
+fn a_kill_while_the_agent_runs_ends_its_tree_and_starts_no_shell() {
+    let sink = Sink::new();
+    let m = manager(&sink);
+    let dir = scratch();
+    let pid = m
+        .spawn(agent_req(
+            "ak",
+            dir.path(),
+            "echo agent-up& start /b ping -n 120 127.0.0.1 >nul& ping -n 300 127.0.0.1 >nul",
+            None,
+        ))
+        .unwrap();
+    assert!(sink.wait_text("ak", Duration::from_secs(10), "agent-up"));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut descendants = Vec::new();
+    while Instant::now() < deadline && descendants.len() < 2 {
+        descendants = tree(pid).into_iter().skip(1).filter(|p| alive(*p)).collect();
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(descendants.len() >= 2, "children not started: {descendants:?}");
+    assert!(m.kill_and_wait("ak", KILL_TIMEOUT), "no exit within 3 s");
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut left = descendants.clone();
+    while Instant::now() < deadline && !left.is_empty() {
+        left.retain(|p| alive(*p));
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(left.is_empty() && !alive(pid), "still alive after the kill: {left:?}");
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(sink.text("ak").matches("\x1b]133;A").count(), 1, "a shell started after the kill");
+    assert!(sink.exit_of("ak").is_none());
+}
+
+#[cfg(windows)]
+#[test]
+fn kill_all_ends_an_agent_and_what_it_started_in_its_console() {
+    let sink = Sink::new();
+    let m = manager(&sink);
+    let dir = scratch();
+    let pid = m.spawn(agent_req("aa", dir.path(), "echo agent-up& ping -n 300 127.0.0.1 >nul", None)).unwrap();
+    assert!(sink.wait_text("aa", Duration::from_secs(10), "agent-up"));
+    let children: Vec<u32> = tree(pid).into_iter().skip(1).collect();
+    assert!(m.kill_all(Duration::from_secs(3)));
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(!alive(pid) && children.iter().all(|p| !alive(*p)));
+}

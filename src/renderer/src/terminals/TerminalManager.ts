@@ -31,7 +31,7 @@ import { webviewEngine } from '../platform';
 import { finalReplaySize, replaySegments, writeReplaySegments, type ReplaySize } from '../../../shared/replay';
 import { cursorOffset, reflowedCursor, type WrapBuffer } from '../../../shared/cursorReflow';
 import { coalesceViewportSync, type ViewportUnsync } from '../../../shared/viewportSync';
-import { showsLaunchLine, StartWatch, type StartScreen } from '../../../shared/startScreen';
+import { AGENT_START_OSC, AGENT_START_PAYLOAD, showsLaunchLine, StartWatch, type StartScreen } from '../../../shared/startScreen';
 import { messageChannelPost, StagedQueue } from '../../../shared/stagedQueue';
 
 /** The background of a cell card (--card-bg in styles.css): a local terminal draws on the card itself (1.0.7). */
@@ -552,6 +552,13 @@ class TerminalManager {
         this.startStep(entry, entry.start.cleared(performance.now(), showsLaunchLine(this.bufferLines(entry))));
       }
       return false;
+    });
+    // 1.2.0, Windows: an agent CLI started without a shell has no launch line to clear; its terminal says so instead.
+    term.parser.registerOscHandler(AGENT_START_OSC, (payload) => {
+      if (payload === AGENT_START_PAYLOAD && entry.start.awaitingClear && entry.replaying === 0) {
+        this.startStep(entry, entry.start.cleared(performance.now(), true));
+      }
+      return true;
     });
     // Codex (tui.notifications) and others signal "needs attention" with OSC 9.
     term.parser.registerOscHandler(9, (payload) => {

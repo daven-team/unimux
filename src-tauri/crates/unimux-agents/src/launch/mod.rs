@@ -4,8 +4,10 @@
 //!
 //! - [`team`]: the startup / resume prompts of an AI team agent (src/shared/teamPrompts.ts);
 //! - [`mcp_config`]: how a cell's MCP token reaches its agent (src/main/mcpCellConfig.ts);
+//! - [`direct`]: Windows: the same CLI started as the terminal's own process, without the shell (falls back to the line);
 //! - [`json`]: `{profile, opts}` as the TS builder takes them (the check build's `--launch-line`, the goldens).
 
+pub mod direct;
 pub mod json;
 pub mod mcp_config;
 pub mod team;

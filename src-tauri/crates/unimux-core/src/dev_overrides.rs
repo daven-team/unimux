@@ -29,10 +29,13 @@ pub struct DevOverrides {
     /// 1.2.0 only (U1): the updater public key (base64 of a minisign key file, as `tauri signer generate` writes it) that
     /// replaces the embedded release key, so a harness run can sign a local feed with a scratch key. Never in a release build.
     pub update_pubkey: Option<String>,
+    /// 1.2.0 only: on Windows an agent cell types its launch line into the shell again (A/B and diagnosis); without it the
+    /// agent CLI is the terminal's own process and the shell starts after it.
+    pub agent_via_shell: bool,
 }
 
 /// The names, for docs and the release check (a release binary must not read them).
-pub const OVERRIDE_NAMES: [&str; 18] = [
+pub const OVERRIDE_NAMES: [&str; 19] = [
     "MC_DATA_DIR",
     "MC_DEBUG_PORT",
     "MC_OFFSCREEN",
@@ -51,6 +54,7 @@ pub const OVERRIDE_NAMES: [&str; 18] = [
     "MC_USAGE_CLAUDE_TOKEN_URL",
     "MC_UPDATE_FEED",
     "MC_UPDATE_PUBKEY",
+    "MC_AGENT_VIA_SHELL",
 ];
 
 impl DevOverrides {
@@ -88,6 +92,7 @@ impl DevOverrides {
             usage_claude_token_url: s("MC_USAGE_CLAUDE_TOKEN_URL"),
             update_feed: s("MC_UPDATE_FEED"),
             update_pubkey: s("MC_UPDATE_PUBKEY"),
+            agent_via_shell: one("MC_AGENT_VIA_SHELL"),
         }
     }
 
@@ -157,6 +162,15 @@ mod tests {
             env(&[("MC_HOOK_DEBUG", "1"), ("MC_SSH_DEBUG", "1"), ("MC_SSH_NO_SAFESTORAGE", "1"), ("MC_CLI_NO_REGISTRY", "1")]),
         );
         assert!(o.hook_debug && o.ssh_debug && o.ssh_no_safestorage && o.cli_no_registry);
+    }
+
+    #[test]
+    fn the_agent_via_shell_switch_needs_exactly_one() {
+        for (value, on) in [("1", true), ("true", false), ("0", false), ("", false)] {
+            let o = DevOverrides::from_lookup_enabled(true, env(&[("MC_AGENT_VIA_SHELL", value)]));
+            assert_eq!(o.agent_via_shell, on, "{value:?}");
+        }
+        assert!(!DevOverrides::from_lookup_enabled(false, env(&[("MC_AGENT_VIA_SHELL", "1")])).agent_via_shell);
     }
 
     #[test]

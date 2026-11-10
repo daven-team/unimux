@@ -16,7 +16,9 @@
 //!    token variable for Codex; otherwise the cell's MCP access ends), Codex its notify hook, a coordinator its delegation
 //!    rules (unless the user's Codex config sets its own developer_instructions), role cells the exit URL of the reset tail;
 //! 6. the bookkeeping (verifiedCodex, automation status `starting`, alive, the prompt file queue) and the spawn through
-//!    the pty service; mark `first-spawn`.
+//!    the pty service; mark `first-spawn`. 1.2.0, Windows: the agent CLI starts as the terminal's own process with the
+//!    arguments of the launch line and the shell follows it in the same terminal (no shell idles under every agent); the
+//!    typed line stays where that is not certain (unimux-agents launch::direct) and with MC_AGENT_VIA_SHELL=1.
 //!
 //! A failure anywhere answers `{ok: false, error}` with the translated "Nie udało się uruchomić terminala: {error}" (the
 //! cell shows it), never a rejected call that leaves the cell blank with an MCP token issued.
@@ -30,7 +32,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use unimux_agents::cli::status::{cli_for_profile, spawn_decision};
+use unimux_agents::cli::status::{CliSource, CliState, CliStatus, cli_for_profile, spawn_decision};
 use unimux_agents::cli::{CliId, GetOptions};
 use unimux_agents::hooks::claude::bypass_proxy_for_hooks;
 use unimux_agents::hooks::route::find_cell;
@@ -39,7 +41,7 @@ use unimux_agents::launch::{self, LaunchOptions, Profile, PromptFile, Shell, tea
 use unimux_core::i18n::translate;
 use unimux_core::utf16::js_trim;
 use unimux_ipc::RouterBuilder;
-use unimux_pty::manager::SpawnRequest;
+use unimux_pty::manager::{AgentLaunch, SpawnRequest};
 use unimux_pty::shell::ShellKind;
 use unimux_state::normalize::js::truthy;
 
@@ -141,6 +143,26 @@ fn user_codex_instructions(env: &[(String, String)]) -> bool {
         .map(PathBuf::from)
         .unwrap_or_else(|| unimux_core::home::home_dir().join(".codex"));
     std::fs::read_to_string(codex_home.join("config.toml")).is_ok_and(|t| launch::codex_config_sets_instructions(&t))
+}
+
+/// The agent CLI started without a shell (launch::direct), or None for the launch line: also when the detector found the CLI
+/// only through the user's PowerShell profile (an alias or a PATH the profile builds: only the shell can run it).
+fn direct_agent(
+    profile: &Profile,
+    opts: &LaunchOptions,
+    env: &[(String, String)],
+    cwd: &str,
+    detected: Option<&CliStatus>,
+) -> Option<AgentLaunch> {
+    if detected.is_some_and(|s| s.state == CliState::Found && s.source == Some(CliSource::Shell)) {
+        return None;
+    }
+    let direct = launch::direct::direct_launch(profile, opts, env, std::path::Path::new(cwd))?;
+    Some(AgentLaunch {
+        file: direct.file,
+        cmdline: direct.cmdline,
+        exit_url: opts.exit_url.clone().filter(|u| launch::is_exit_url(u)),
+    })
 }
 
 fn tr(ctx: &AppContext, key: &str, params: &[(&str, &str)]) -> String {
@@ -330,6 +352,13 @@ async fn spawn_unsafe(ctx: &Arc<AppContext>, req: &SpawnCell) -> Result<Value, S
         exit_url,
     };
     let command = launch::build_launch_command(&req.profile, &opts).map_err(str::to_string)?;
+    // Windows: the CLI as the terminal's own process (no shell idles under it), the shell after it; the line stays the
+    // fallback (launch::direct says when) and the way back for A/B (MC_AGENT_VIA_SHELL=1, check builds).
+    let agent = if command.is_some() && cfg!(windows) && !ctx.overrides.agent_via_shell {
+        direct_agent(&req.profile, &opts, &env, &req.cwd, cli.and_then(|id| detector.peek(id)).as_ref())
+    } else {
+        None
+    };
 
     host().set_verified_codex(cell, None);
     if is_codex
@@ -348,6 +377,7 @@ async fn spawn_unsafe(ctx: &Arc<AppContext>, req: &SpawnCell) -> Result<Value, S
     spawn.rows = req.rows;
     spawn.env = env;
     spawn.command = command;
+    spawn.agent = agent;
     spawn.cell_id = Some(cell.to_string());
     if !service().spawn(spawn, false) {
         // Dropped by a service that went fatal or stopped meanwhile: nothing will report this terminal.

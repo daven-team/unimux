@@ -505,7 +505,14 @@ pub fn app_started(ctx: &Arc<AppContext>) {
         let c = Arc::downgrade(ctx);
         monitor.set_cells(Arc::new(move || {
             let Some(ctx) = c.upgrade() else { return vec![] };
-            host().cell_pids(|cell| ctx.cells.is_alive(cell))
+            // The pid running now: an agent started without a shell hands its terminal over to the shell when it ends.
+            let mut cells = host().cell_pids(|cell| ctx.cells.is_alive(cell));
+            for (cell, pid) in &mut cells {
+                if let Some(live) = service().pid(cell) {
+                    *pid = live;
+                }
+            }
+            cells
         }));
     }
     use crate::lifecycle::wind_down::phase;

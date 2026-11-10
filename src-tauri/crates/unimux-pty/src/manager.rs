@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use parking_lot::{Condvar, Mutex, RwLock};
 
 use crate::shell::{Launch, Platform, ShellKind, resolve_shell, terminal_env};
-use crate::shell_integration::{default_shell_dir, integrated_launch};
+use crate::shell_integration::{after_agent_launch, agent_start_marks, default_shell_dir, integrated_launch};
 
 #[cfg(windows)]
 use crate::conpty as sys;
@@ -45,6 +45,20 @@ pub struct SpawnRequest {
     pub cell_id: Option<String>,
     /// The program instead of the resolved shell (shell integration of P4, tests).
     pub launch: Option<Launch>,
+    /// Windows: the agent CLI started as the terminal's own process instead of `command` typed into the shell; the shell
+    /// (with its prompt marks) starts in the same terminal once the CLI ended. Ignored elsewhere and with `launch`.
+    pub agent: Option<AgentLaunch>,
+}
+
+/// An agent CLI started without a shell (Windows; see [`SpawnRequest::agent`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentLaunch {
+    /// The program CreateProcess starts (the CLI's .exe, or cmd.exe for a .cmd shim).
+    pub file: String,
+    /// The complete command line.
+    pub cmdline: String,
+    /// The hook server's URL the CLI's exit code is posted to (`<url>/<code>`), like the launch line's tail did.
+    pub exit_url: Option<String>,
 }
 
 impl SpawnRequest {
@@ -59,6 +73,7 @@ impl SpawnRequest {
             command: None,
             cell_id: None,
             launch: None,
+            agent: None,
         }
     }
 }
@@ -370,6 +385,17 @@ impl PtyManager {
                 (launch, terminal_env(&env, req.cell_id.as_deref()))
             }
         };
+        // Windows: an agent CLI as the terminal's own process, the shell after it (no shell idles under the agent).
+        let direct = match (&req.launch, &req.agent) {
+            (None, Some(agent)) if cfg!(windows) => Some(Direct {
+                agent: agent.clone(),
+                kind: req.shell,
+                shell: resolve_shell(req.shell, &req.env, Platform::current()),
+            }),
+            _ => None,
+        };
+        // What the shell wrote before the launch line, for the renderer's status and start card (shell_integration.rs).
+        let mut prefix = direct.as_ref().map(|_| agent_start_marks(req.shell, &env));
 
         let slot = Arc::new(Slot {
             id: req.id.clone(),
@@ -389,13 +415,16 @@ impl PtyManager {
         let serial = slot.serial;
         let id = req.id.clone();
         let weak = Arc::downgrade(inner);
-        let mut pending_command = req.command.clone();
+        let mut pending_command = if direct.is_some() { None } else { req.command.clone() };
         let on_data = {
             let (weak, id) = (weak.clone(), id.clone());
             move |data: &[u8]| {
                 let Some(inner) = weak.upgrade() else { return };
                 if inner.current(&id, serial).is_none() {
                     return;
+                }
+                if let Some(prefix) = prefix.take() {
+                    inner.guarded(|| inner.sink().data(&id, &prefix));
                 }
                 inner.guarded(|| inner.sink().data(&id, data));
                 if let Some(cmd) = pending_command.take() {
@@ -436,7 +465,7 @@ impl PtyManager {
         };
 
         inner.running.lock().insert(serial, slot.clone());
-        let spawned = spawn_sys(&launch, &req.cwd, env, cols, rows, Box::new(on_data), Box::new(on_exit));
+        let spawned = spawn_sys(&launch, direct, &req.cwd, env, cols, rows, Box::new(on_data), Box::new(on_exit));
         let pty = match spawned {
             Ok(pty) => Arc::new(pty),
             Err(e) => {
@@ -547,9 +576,40 @@ impl std::fmt::Debug for Slot {
 type DataFn = Box<dyn FnMut(&[u8]) + Send>;
 type ExitFn = Box<dyn FnOnce(i64) + Send>;
 
+/// An agent CLI started as the terminal's own process and the shell that follows it.
+struct Direct {
+    agent: AgentLaunch,
+    kind: ShellKind,
+    /// The resolved shell (without its prompt marks: [`after_agent_launch`] adds them with the CLI's exit code).
+    shell: Launch,
+}
+
+/// The time the exit report may take (the launch line's tail ran `curl -m 2`).
+const EXIT_POST_LIMIT: Duration = Duration::from_secs(2);
+
+/// Posts the agent CLI's exit code to the hook server as the launch line's tail did (`curl -s --noproxy * -m 2 -X POST
+/// <url>/<code>`): `url` is `http://127.0.0.1:<port>/<path>`. Failures are ignored like curl's.
+pub fn post_exit(url: &str, code: i32) {
+    use std::io::{Read as _, Write as _};
+    let Some(rest) = url.strip_prefix("http://") else { return };
+    let (host, path) = rest.split_once('/').unwrap_or((rest, ""));
+    let Ok(addr) = host.parse::<std::net::SocketAddr>() else { return };
+    let Ok(mut stream) = std::net::TcpStream::connect_timeout(&addr, EXIT_POST_LIMIT) else { return };
+    let _ = stream.set_write_timeout(Some(EXIT_POST_LIMIT));
+    let _ = stream.set_read_timeout(Some(EXIT_POST_LIMIT));
+    let request = format!("POST /{path}/{code} HTTP/1.1\r\nHost: {host}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+    if stream.write_all(request.as_bytes()).is_ok() {
+        // The answer is read so the server never sees a reset.
+        let mut answer = [0u8; 512];
+        let _ = stream.read(&mut answer);
+    }
+}
+
 #[cfg(windows)]
+#[allow(clippy::too_many_arguments)]
 fn spawn_sys(
     launch: &Launch,
+    direct: Option<Direct>,
     cwd: &std::path::Path,
     env: Vec<(String, String)>,
     cols: u16,
@@ -558,22 +618,46 @@ fn spawn_sys(
     on_exit: ExitFn,
 ) -> io::Result<sys::Pty> {
     let api = sys::ConptyApi::shared()?;
-    let opts = sys::SpawnOptions {
+    let mut opts = sys::SpawnOptions {
         file: launch.file.clone(),
         args: launch.args.clone(),
         cwd: Some(cwd.to_path_buf()),
-        env: Some(env),
+        env: Some(env.clone()),
         cols,
         rows,
         flags: 0,
         job: true,
+        cmdline: None,
     };
-    sys::Pty::spawn(api, &opts, on_data, Box::new(move |code: u32| on_exit(i64::from(code))))
+    let then: Option<sys::ThenFn> = direct.map(|direct| {
+        opts.file = direct.agent.file.clone();
+        opts.args = Vec::new();
+        opts.cmdline = Some(direct.agent.cmdline.clone());
+        let cwd = cwd.to_path_buf();
+        let then: sys::ThenFn = Box::new(move |code: u32| {
+            // The DWORD as PowerShell's $LASTEXITCODE shows it (an NTSTATUS is negative).
+            let code = code as i32;
+            if let Some(url) = direct.agent.exit_url.clone() {
+                let _ = std::thread::Builder::new().name("pty-agent-exit".into()).spawn(move || post_exit(&url, code));
+            }
+            let (shell, cmdline) = after_agent_launch(direct.kind, &direct.shell, &env, code);
+            let mut next = sys::SpawnOptions::new(shell.file, &[]);
+            next.args = shell.args;
+            next.cmdline = cmdline;
+            next.cwd = Some(cwd);
+            next.env = Some(env);
+            Some(next)
+        });
+        then
+    });
+    sys::Pty::spawn_then(api, &opts, then, on_data, Box::new(move |code: u32| on_exit(i64::from(code))))
 }
 
 #[cfg(unix)]
+#[allow(clippy::too_many_arguments)]
 fn spawn_sys(
     launch: &Launch,
+    _direct: Option<Direct>,
     cwd: &std::path::Path,
     env: Vec<(String, String)>,
     cols: u16,
