@@ -813,7 +813,9 @@ fn create_window(app: &AppHandle, win: &Arc<UpdateWindow>) -> tauri::Result<()> 
         })
         .devtools(cfg!(dev_overrides))
         .zoom_hotkeys_enabled(false)
-        .browser_extensions_enabled(false);
+        .browser_extensions_enabled(false)
+        // No WebView2 "Suggestions" popups over the app's own inputs (and no form data it would store for them).
+        .general_autofill_enabled(false);
     #[cfg(windows)]
     if let Some(dir) = win.webview_dir.get() {
         builder = builder.additional_browser_args(&browser_args()).data_directory(dir.clone());

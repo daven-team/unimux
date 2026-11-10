@@ -87,6 +87,16 @@ impl Heartbeat {
         }
     }
 
+    /// The earliest time at which [`Heartbeat::tick`] can do something (the next heartbeat or the end of the wait for an
+    /// answer); `None` while an unanswered heartbeat already made the renderer unresponsive (only an answer or a reset
+    /// changes that). The heartbeat loop sleeps until then instead of polling.
+    pub fn next_due(&self, now: u64) -> Option<u64> {
+        match self.outstanding {
+            Some((_, sent)) => (!self.unresponsive).then(|| sent + UNRESPONSIVE_AFTER.as_millis() as u64),
+            None => Some(self.last_sent.map_or(now, |t| t + HEARTBEAT_INTERVAL.as_millis() as u64)),
+        }
+    }
+
     /// The page answered heartbeat `id`. True when this ends an unresponsive phase (Electron's `responsive`).
     pub fn answered(&mut self, id: u64) -> bool {
         if self.outstanding.is_none_or(|(current, _)| current != id) {
@@ -170,6 +180,25 @@ mod tests {
         assert!(h.answered(1));
         assert!(!h.is_unresponsive());
         assert_eq!(h.tick(30_000), Tick::Ping(2));
+    }
+
+    #[test]
+    fn the_next_due_time_is_the_next_heartbeat_or_the_end_of_the_wait() {
+        let mut h = Heartbeat::default();
+        assert_eq!(h.next_due(7), Some(7));
+        assert_eq!(h.tick(0), Tick::Ping(1));
+        assert_eq!(h.next_due(10), Some(15_000));
+        assert!(!h.answered(1));
+        assert_eq!(h.next_due(10), Some(2000));
+        assert_eq!(h.tick(1999), Tick::Nothing);
+        assert_eq!(h.tick(2000), Tick::Ping(2));
+        assert_eq!(h.tick(17_000), Tick::Unresponsive);
+        assert_eq!(h.next_due(17_000), None);
+        assert!(h.answered(2));
+        // The answer came long after the interval: the next heartbeat is due at once.
+        assert_eq!(h.next_due(20_000), Some(4000));
+        h.reset();
+        assert_eq!(h.next_due(20_000), Some(20_000));
     }
 
     #[test]

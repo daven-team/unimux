@@ -18,10 +18,10 @@
 pub mod install;
 pub mod prompt;
 
-use std::collections::HashSet;
-use std::path::PathBuf;
-use std::sync::{Arc, OnceLock, Weak};
-use std::time::Duration;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock, OnceLock, Weak};
+use std::time::{Duration, SystemTime};
 
 use parking_lot::Mutex;
 use serde_json::{Value, json};
@@ -264,15 +264,61 @@ fn session_index() -> Arc<SessionIndex> {
 }
 
 /// `currentBranch(path)` of src/main/worktree.ts: `git rev-parse --abbrev-ref HEAD` (15 s), None for a detached HEAD or any
-/// failure. Called on the blocking pool.
+/// failure. Called on the blocking pool. sessions:list asks for every worktree folder on every listing (every 20 s while
+/// the window is focused), so an answer of git is kept per folder until its HEAD file changes (mtime or content); a folder
+/// whose HEAD file cannot be found or read asks git every time, as before.
 fn current_branch(rt: &tokio::runtime::Handle, path: &str) -> Option<String> {
+    let Some(head) = head_stamp(Path::new(path)) else { return branch_from_git(rt, path).ok().flatten() };
+    if let Some((stamp, branch)) = BRANCHES.lock().get(path)
+        && *stamp == head
+    {
+        return branch.clone();
+    }
+    let branch = branch_from_git(rt, path).ok()?;
+    BRANCHES.lock().insert(path.to_string(), (head, branch.clone()));
+    branch
+}
+
+/// The branches answered by git per worktree folder, with the HEAD file they were read for.
+type BranchCache = HashMap<String, (HeadStamp, Option<String>)>;
+static BRANCHES: LazyLock<Mutex<BranchCache>> = LazyLock::new(Default::default);
+
+/// The HEAD file of a folder as git last left it: its modification time and its content.
+#[derive(PartialEq, Eq)]
+struct HeadStamp {
+    modified: SystemTime,
+    content: Vec<u8>,
+}
+
+/// The HEAD file of the repository at `dir`: `.git/HEAD`, or for a worktree (`.git` is a file `gitdir: <path>`) the HEAD
+/// in that folder. None when it cannot be found or read.
+fn head_stamp(dir: &Path) -> Option<HeadStamp> {
+    let dot_git = dir.join(".git");
+    let git_dir = if dot_git.is_dir() {
+        dot_git
+    } else {
+        let text = std::fs::read_to_string(&dot_git).ok()?;
+        let target = text.lines().next()?.strip_prefix("gitdir:")?.trim();
+        if target.is_empty() {
+            return None;
+        }
+        dir.join(target)
+    };
+    let head = git_dir.join("HEAD");
+    let modified = std::fs::metadata(&head).ok()?.modified().ok()?;
+    let content = std::fs::read(&head).ok()?;
+    Some(HeadStamp { modified, content })
+}
+
+/// `git rev-parse --abbrev-ref HEAD`: Ok(None) for a detached HEAD, Err when git failed (not kept, asked again next time).
+fn branch_from_git(rt: &tokio::runtime::Handle, path: &str) -> Result<Option<String>, ()> {
     use unimux_git::runner::{GitOptions, RunOptions, Runner};
     let timeout = Duration::from_secs(15);
     let runner = Runner::new(GitOptions { read_timeout: timeout, ..GitOptions::default() });
     let options = RunOptions::read(timeout);
-    let out = rt.block_on(runner.run(path, &["rev-parse", "--abbrev-ref", "HEAD"], &options, || None)).ok()?;
+    let out = rt.block_on(runner.run(path, &["rev-parse", "--abbrev-ref", "HEAD"], &options, || None)).map_err(|_| ())?;
     let branch = out.stdout.trim();
-    (!branch.is_empty() && branch != "HEAD").then(|| branch.to_string())
+    Ok((!branch.is_empty() && branch != "HEAD").then(|| branch.to_string()))
 }
 
 fn register_sessions(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
@@ -415,6 +461,27 @@ mod tests {
         fn allowed(&self, _: &Caller) -> bool {
             true
         }
+    }
+
+    #[test]
+    fn the_head_file_of_a_repository_and_of_a_worktree_is_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        std::fs::create_dir_all(repo.join(".git/worktrees/wt")).unwrap();
+        std::fs::write(repo.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+        std::fs::write(repo.join(".git/worktrees/wt/HEAD"), "ref: refs/heads/feature\n").unwrap();
+        let wt = dir.path().join("wt");
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::write(wt.join(".git"), "gitdir: ../repo/.git/worktrees/wt\n").unwrap();
+        assert_eq!(head_stamp(&repo).unwrap().content, b"ref: refs/heads/main\n");
+        assert_eq!(head_stamp(&wt).unwrap().content, b"ref: refs/heads/feature\n");
+        let before = head_stamp(&wt).unwrap();
+        std::fs::write(repo.join(".git/worktrees/wt/HEAD"), "ref: refs/heads/other\n").unwrap();
+        assert!(head_stamp(&wt).unwrap() != before);
+        // No repository, or a .git file that names no folder: git is asked every time.
+        assert!(head_stamp(dir.path()).is_none());
+        std::fs::write(wt.join(".git"), "nonsense").unwrap();
+        assert!(head_stamp(&wt).is_none());
     }
 
     #[test]

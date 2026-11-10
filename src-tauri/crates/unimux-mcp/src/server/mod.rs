@@ -84,7 +84,7 @@ pub type Log = Arc<dyn Fn(&str) + Send + Sync>;
 pub struct Config {
     /// The version the server reports in `initialize` (the app's version).
     pub version: String,
-    /// How often a waiting call sends progress to a client that asked for it (10 s).
+    /// How often a waiting call sends progress to a client that asked for it ([`crate::catalog::PROGRESS_EVERY_MS`]).
     pub progress_every: Duration,
     /// Per-token request budget: burst, refill per second. None disables it (benchmarks, the wire driver).
     pub rate: Option<(f64, f64)>,
@@ -111,7 +111,7 @@ impl Default for Config {
         let base = Instant::now();
         Self {
             version: env!("CARGO_PKG_VERSION").to_string(),
-            progress_every: Duration::from_secs(10),
+            progress_every: Duration::from_millis(crate::catalog::PROGRESS_EVERY_MS),
             rate: Some((120.0, 60.0)),
             max_in_flight_per_token: 8,
             max_in_flight: 256,

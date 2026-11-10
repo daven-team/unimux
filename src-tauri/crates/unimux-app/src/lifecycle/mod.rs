@@ -122,6 +122,8 @@ pub struct Lifecycle {
     /// The wind-down steps; every service registers its own (see [`wind_down::phase`]).
     pub wind_down: WindDown,
     renderer: Mutex<RendererState>,
+    /// Wakes the heartbeat loop (with `renderer`) when its next deadline changes: an answer, a navigation.
+    heartbeat_wake: Condvar,
     page_gone_hooks: RwLock<Vec<LabelHook>>,
     exit_hooks: Mutex<Vec<Box<dyn FnOnce() + Send>>>,
     instance: Mutex<Option<Box<dyn Send>>>,
@@ -152,6 +154,7 @@ impl Lifecycle {
             confirm: Mutex::new(QuitConfirm::default()),
             wind_down: WindDown::new(),
             renderer: Mutex::new(RendererState::default()),
+            heartbeat_wake: Condvar::new(),
             page_gone_hooks: RwLock::new(Vec::new()),
             exit_hooks: Mutex::new(Vec::new()),
             instance: Mutex::new(None),
@@ -700,6 +703,7 @@ pub fn page_load(ctx: &Arc<AppContext>, label: &str, finished: bool) {
         st.hung_reload_requested = false;
         st.hung_timer = None;
         st.heartbeat.reset();
+        ctx.lifecycle.heartbeat_wake.notify_all();
     }
 }
 
@@ -718,6 +722,7 @@ fn page_gone(ctx: &Arc<AppContext>, label: &str) {
         let mut st = ctx.lifecycle.renderer.lock();
         st.heartbeat.reset();
         st.hung_timer = None;
+        ctx.lifecycle.heartbeat_wake.notify_all();
     }
     let hooks: Vec<LabelHook> = ctx.lifecycle.page_gone_hooks.read().clone();
     for hook in hooks {
@@ -879,21 +884,20 @@ fn ask_about_hung_renderer(ctx: &Arc<AppContext>) {
     });
 }
 
-/// The heartbeat of the main window's page ([`renderer`]); ends with the window or the exit.
+/// The heartbeat of the main window's page ([`renderer`]); ends with the window or the exit. The loop sleeps until the next
+/// deadline of the heartbeat (woken early by an answer or a navigation), but at most [`HEARTBEAT_CHECK_MAX`], which also
+/// bounds how late it notices the exit, a closed window or a page that loaded again after a crash.
 fn start_heartbeat(window: WebviewWindow, ctx: Arc<AppContext>) {
     let _ = std::thread::Builder::new().name("renderer-heartbeat".into()).spawn(move || {
+        std::thread::sleep(Duration::from_millis(500));
         loop {
-            std::thread::sleep(Duration::from_millis(500));
             let lc = &ctx.lifecycle;
             if lc.exiting.load(Ordering::SeqCst) || main_window(&ctx).is_none() {
                 return;
             }
             let tick = {
                 let mut st = lc.renderer.lock();
-                if st.dead {
-                    continue;
-                }
-                st.heartbeat.tick(lc.mono_ms())
+                if st.dead { Tick::Nothing } else { st.heartbeat.tick(lc.mono_ms()) }
             };
             match tick {
                 Tick::Nothing => {}
@@ -901,15 +905,32 @@ fn start_heartbeat(window: WebviewWindow, ctx: Arc<AppContext>) {
                 Tick::Ping(id) => {
                     let c = ctx.clone();
                     webview::ping(&window, move || {
-                        if c.lifecycle.renderer.lock().heartbeat.answered(id) {
+                        let lc = &c.lifecycle;
+                        let ended_hang = {
+                            let mut st = lc.renderer.lock();
+                            let ended = st.heartbeat.answered(id);
+                            lc.heartbeat_wake.notify_all();
+                            ended
+                        };
+                        if ended_hang {
                             responsive(&c);
                         }
                     });
                 }
             }
+            let mut st = lc.renderer.lock();
+            let now = lc.mono_ms();
+            let due = if st.dead { None } else { st.heartbeat.next_due(now) };
+            let wait = due.map_or(HEARTBEAT_CHECK_MAX, |d| Duration::from_millis(d.saturating_sub(now)).min(HEARTBEAT_CHECK_MAX));
+            if !wait.is_zero() {
+                lc.heartbeat_wake.wait_for(&mut st, wait);
+            }
         }
     });
 }
+
+/// The longest sleep of the heartbeat loop between two checks.
+const HEARTBEAT_CHECK_MAX: Duration = renderer::HEARTBEAT_INTERVAL;
 
 /// Shows a question about a window (native, parented) and calls `on_answer` with the button index, off the event loop. In an
 /// unattended run the question is only recorded (test bridge `dialogs` / `dialogAnswer`).

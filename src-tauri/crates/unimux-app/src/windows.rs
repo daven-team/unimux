@@ -117,6 +117,8 @@ pub fn create_main(app: &AppHandle, ctx: &Arc<AppContext>) -> tauri::Result<Webv
         .devtools(cfg!(dev_overrides))
         .zoom_hotkeys_enabled(false)
         .browser_extensions_enabled(false)
+        // No WebView2 "Suggestions" popups over the app's own inputs (and no form data it would store for them).
+        .general_autofill_enabled(false)
         // HTML5 drag and drop (tab reorder and detach, snippets, notes, the explorer, SFTP) needs WebView2's own drop
         // target; Tauri's handler would replace it. OS file drops get their paths on the side (file_drop.rs, pathsForFiles).
         .disable_drag_drop_handler();

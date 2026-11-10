@@ -38,8 +38,9 @@ pub const WAIT_MAX_CODEX: u32 = 170;
 pub const TASK_WAIT_MAX_SECONDS: u32 = 3600;
 /// How long the user has to answer an elicitation (ELICIT_TIMEOUT_MS).
 pub const ELICIT_TIMEOUT_MS: u64 = 120_000;
-/// How often a waiting wait_for reports progress (PROGRESS_EVERY_MS).
-pub const PROGRESS_EVERY_MS: u64 = 10_000;
+/// How often a waiting wait_for reports progress (PROGRESS_EVERY_MS of 1.1.4 was 10 s). The progress only resets Claude
+/// Code's 5 minute idle timer, so once a minute keeps a wide margin with fewer wakeups of an idle team.
+pub const PROGRESS_EVERY_MS: u64 = 60_000;
 /// automation.ts QUEUED_NOTE.
 pub const QUEUED_NOTE: &str = "Queued for the worker; it sees it on read_inbox/wait_for.";
 

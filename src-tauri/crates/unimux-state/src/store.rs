@@ -209,10 +209,16 @@ pub struct Saver {
     write: WriteFn,
     write_bak: WriteFn,
     log: Arc<dyn Fn(&str) + Send + Sync>,
-    state: Mutex<SaverState>,
-    wake: Condvar,
+    timer: Arc<Timer>,
     /// Serializes writes (the timer thread and an explicit flush never write at the same time).
     writing: Mutex<()>,
+}
+
+/// The saver's state and the condvar of its timer thread. The thread holds this (not the saver) while it waits, so it can
+/// wait without a timeout and a dropped saver still wakes it up (see `Drop for Saver`).
+struct Timer {
+    state: Mutex<SaverState>,
+    wake: Condvar,
 }
 
 impl Saver {
@@ -237,41 +243,45 @@ impl Saver {
             write,
             write_bak,
             log,
-            state: Mutex::new(SaverState {
-                pending: None,
-                deadline: None,
-                failures: 0,
-                bak_due: Instant::now() + BAK_REFRESH,
-                stopped: false,
+            timer: Arc::new(Timer {
+                state: Mutex::new(SaverState {
+                    pending: None,
+                    deadline: None,
+                    failures: 0,
+                    bak_due: Instant::now() + BAK_REFRESH,
+                    stopped: false,
+                }),
+                wake: Condvar::new(),
             }),
-            wake: Condvar::new(),
             writing: Mutex::new(()),
         });
         let weak = Arc::downgrade(&saver);
+        let timer = saver.timer.clone();
         thread::Builder::new()
             .name("state-saver".into())
             .spawn(move || {
                 loop {
-                    let Some(saver) = weak.upgrade() else { return };
                     let due = {
-                        let mut st = saver.state.lock();
+                        let mut st = timer.state.lock();
                         if st.stopped {
                             return;
                         }
                         match st.deadline {
+                            // Nothing pending: sleeps until a save, a failed flush, stop or the saver's drop notifies.
                             None => {
-                                saver.wake.wait_for(&mut st, Duration::from_millis(500));
+                                timer.wake.wait(&mut st);
                                 false
                             }
                             Some(d) if d > Instant::now() => {
                                 let left = d - Instant::now();
-                                saver.wake.wait_for(&mut st, left);
+                                timer.wake.wait_for(&mut st, left);
                                 false
                             }
                             Some(_) => true,
                         }
                     };
                     if due {
+                        let Some(saver) = weak.upgrade() else { return };
                         saver.flush();
                     }
                 }
@@ -282,11 +292,11 @@ impl Saver {
 
     /// A new state to save (debounced). While a failed save waits for its retry, that timer stays.
     pub fn save(&self, state: Arc<Value>) {
-        let mut st = self.state.lock();
+        let mut st = self.timer.state.lock();
         st.pending = Some(state);
         if st.deadline.is_none() {
             st.deadline = Some(Instant::now() + self.debounce);
-            self.wake.notify_all();
+            self.timer.wake.notify_all();
         }
     }
 
@@ -294,7 +304,7 @@ impl Saver {
     pub fn flush(&self) -> bool {
         let _w = self.writing.lock();
         let s = {
-            let mut st = self.state.lock();
+            let mut st = self.timer.state.lock();
             st.deadline = None;
             match st.pending.take() {
                 Some(s) => s,
@@ -303,7 +313,7 @@ impl Saver {
         };
         match (self.write)(&self.dir, &s) {
             Ok(()) => {
-                let mut st = self.state.lock();
+                let mut st = self.timer.state.lock();
                 if st.failures > 0 {
                     (self.log)(&format!("state saved again after {} failed attempt(s)", st.failures));
                 }
@@ -316,7 +326,7 @@ impl Saver {
                 true
             }
             Err(e) => {
-                let mut st = self.state.lock();
+                let mut st = self.timer.state.lock();
                 // A newer state saved meanwhile wins; otherwise this one is tried again.
                 if st.pending.is_none() {
                     st.pending = Some(s);
@@ -326,7 +336,7 @@ impl Saver {
                     (self.log)(&format!("state save failed, retrying: {e}"));
                 }
                 st.deadline = Some(Instant::now() + retry_delay(st.failures));
-                self.wake.notify_all();
+                self.timer.wake.notify_all();
                 false
             }
         }
@@ -334,7 +344,7 @@ impl Saver {
 
     /// True while a state change is not on disk yet.
     pub fn has_pending(&self) -> bool {
-        self.state.lock().pending.is_some()
+        self.timer.state.lock().pending.is_some()
     }
 
     /// The last save at quit / session end: a failed save is tried again every `interval` while `timeout` lasts.
@@ -351,13 +361,20 @@ impl Saver {
     /// Tests: an hour has passed since the last .bak refresh.
     #[cfg(test)]
     fn bak_due_now(&self) {
-        self.state.lock().bak_due = Instant::now();
+        self.timer.state.lock().bak_due = Instant::now();
     }
 
     /// Stops the timer thread (after the final flush).
     pub fn stop(&self) {
-        self.state.lock().stopped = true;
-        self.wake.notify_all();
+        self.timer.state.lock().stopped = true;
+        self.timer.wake.notify_all();
+    }
+}
+
+impl Drop for Saver {
+    /// A saver dropped without `stop` ends its timer thread too (it no longer wakes up on its own to notice).
+    fn drop(&mut self) {
+        self.stop();
     }
 }
 

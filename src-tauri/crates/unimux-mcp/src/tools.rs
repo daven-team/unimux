@@ -30,7 +30,7 @@ pub struct CallCtx {
     pub elicit: Option<Elicit>,
     /// Present only when the client asked for progress (`_meta.progressToken`) and the answer is a stream.
     pub progress: Option<Progress>,
-    /// How often a waiting call sends progress (10 s; tests shorten it).
+    /// How often a waiting call sends progress (60 s; tests shorten it).
     pub progress_every: Duration,
     /// The call runs as an MCP task (no elicitation, no progress).
     pub task: bool,

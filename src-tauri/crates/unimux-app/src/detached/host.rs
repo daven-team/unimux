@@ -372,6 +372,8 @@ impl Host for TauriHost {
             .devtools(cfg!(dev_overrides))
             .zoom_hotkeys_enabled(false)
             .browser_extensions_enabled(false)
+            // No WebView2 "Suggestions" popups over the app's own inputs (and no form data it would store for them).
+            .general_autofill_enabled(false)
             .disable_drag_drop_handler();
         #[cfg(windows)]
         {

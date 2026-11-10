@@ -292,7 +292,9 @@ fn create(gate: &Arc<GateWindow>) -> tauri::Result<()> {
         })
         .devtools(cfg!(dev_overrides))
         .zoom_hotkeys_enabled(false)
-        .browser_extensions_enabled(false);
+        .browser_extensions_enabled(false)
+        // No WebView2 "Suggestions" popups over the app's own inputs (and no form data it would store for them).
+        .general_autofill_enabled(false);
     // The app's WebView2 folder and browser arguments: every webview of this process must use the same ones (0x8007139F).
     #[cfg(windows)]
     {
