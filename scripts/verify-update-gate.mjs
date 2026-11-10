@@ -33,8 +33,9 @@ const keep = process.argv.includes('--keep');
 const caseArg = process.argv.find((a) => a.startsWith('--case='));
 const ALL = ['gate', 'running', 'corrupt', 'gatefail'];
 const selected = caseArg ? caseArg.slice('--case='.length).split(',').filter((c) => ALL.includes(c)) : ALL;
-const PAYLOAD_VERSION = '1.2.1-test.1';
 const OLD_VERSION = JSON.parse(readFileSync(join(root, 'src-tauri', 'crates', 'unimux-app', 'tauri.conf.json'), 'utf8')).version;
+// The payload is always newer than the app it updates: the next patch as a prerelease (1.2.1 -> 1.2.2-test.1).
+const PAYLOAD_VERSION = (([major, minor, patch]) => `${major}.${minor}.${Number(patch) + 1}-test.1`)(OLD_VERSION.split('.'));
 const PRODUCT = 'unimux-u1';
 const PUBLISHER = JSON.parse(readFileSync(join(root, 'src-tauri', 'crates', 'unimux-app', 'tauri.conf.json'), 'utf8')).bundle.publisher;
 const checkExe = join(root, 'src-tauri', 'target', 'check', 'release', 'unimux.exe');
@@ -255,7 +256,7 @@ async function runGate() {
     await gate.evaluate(`document.getElementById('open').click()`);
     const pidFile = () => json(join(p.dataDir, 'update', 'work', 'config.json'));
     const config = await until(() => pidFile(), 60000, 'the hand-over (work/config.json)');
-    check('hand-over config names the target and the downloaded installer', config.version === PAYLOAD_VERSION && config.fromVersion === OLD_VERSION && /unimux-Setup-1\.2\.1-test\.1\.exe$/i.test(config.installer ?? ''), `${config.version} ${config.installer}`);
+    check('hand-over config names the target and the downloaded installer', config.version === PAYLOAD_VERSION && config.fromVersion === OLD_VERSION && (config.installer ?? '').toLowerCase().endsWith(`unimux-Setup-${PAYLOAD_VERSION}.exe`.toLowerCase()), `${config.version} ${config.installer}`);
     check('the installer is the verified download in the updater root', (config.installer ?? '').toLowerCase().startsWith(join(updaterRoot, 'pending').toLowerCase()));
     const record = json(join(p.dataDir, 'update-gate.json'));
     check('update-gate.json marks the attempt before the install', record?.version === PAYLOAD_VERSION, JSON.stringify(record));

@@ -43,7 +43,7 @@ export const SCRIPTS = [
   { file: 'verify-caption.mjs', only: 'tauri', windowsOnly: true, timeout: 20, missing: () => (existsSync(join(ROOT, 'src-tauri', 'target', 'release', 'examples', 'wincap.exe')) ? null : 'the wincap tool (cd src-tauri && node ../scripts/msvc-run.mjs cargo build -p unimux-platform --example wincap --release)') },
   { file: 'verify-update-window.mjs', only: 'tauri', windowsOnly: true, timeout: 20 },
   // U1: the startup gate and the install from a running app against a scratch feed (the payload installer: --build first).
-  { file: 'verify-update-gate.mjs', only: 'tauri', windowsOnly: true, timeout: 20, missing: () => (existsSync(join(ROOT, 'src-tauri', 'target', 'u1', 'unimux-u1_1.2.1-test.1_x64-setup.exe')) ? null : 'the payload installer (node scripts/verify-update-gate.mjs --build)') },
+  { file: 'verify-update-gate.mjs', only: 'tauri', windowsOnly: true, timeout: 20, missing: () => (existsSync(join(ROOT, 'src-tauri', 'target', 'u1', `unimux-u1_${u1PayloadVersion()}_x64-setup.exe`)) ? null : 'the payload installer (node scripts/verify-update-gate.mjs --build)') },
   // A6: the GitHub sign-in with 1.1.4's token.json (a stand-in gh, never the user's sign-in).
   { file: 'verify-tauri-github.mjs', only: 'tauri', windowsOnly: true },
   { file: 'verify-release-build.mjs', ci: 'release.yml checks the CI run of a tag (RELEASE_TAG, BUILD_RUN_ID)' },
@@ -63,6 +63,11 @@ export const SCRIPTS = [
 const opt = (name) => process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
 const only = opt('only')?.split(',');
 const skip = opt('skip')?.split(',') ?? [];
+// The payload version of verify-update-gate.mjs (the next patch of the app as a prerelease).
+function u1PayloadVersion() {
+  const [major, minor, patch] = JSON.parse(readFileSync(join(ROOT, 'src-tauri', 'crates', 'unimux-app', 'tauri.conf.json'), 'utf8')).version.split('.');
+  return `${major}.${minor}.${Number(patch) + 1}-test.1`;
+}
 const pick = (s) => { const n = s.file.replace(/\.mjs$/, ''); return (!only || only.some((o) => n === o || n === `verify-${o}`)) && !skip.some((o) => n === o || n === `verify-${o}`); };
 
 function killTree(pid) {
