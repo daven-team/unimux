@@ -17,7 +17,9 @@ use std::time::{Duration, Instant};
 use parking_lot::{Condvar, Mutex, RwLock};
 
 use crate::shell::{Launch, Platform, ShellKind, resolve_shell, terminal_env};
-use crate::shell_integration::{after_agent_launch, agent_start_marks, default_shell_dir, integrated_launch};
+#[cfg(windows)]
+use crate::shell_integration::after_agent_launch;
+use crate::shell_integration::{agent_start_marks, default_shell_dir, integrated_launch};
 
 #[cfg(windows)]
 use crate::conpty as sys;
@@ -576,7 +578,8 @@ impl std::fmt::Debug for Slot {
 type DataFn = Box<dyn FnMut(&[u8]) + Send>;
 type ExitFn = Box<dyn FnOnce(i64) + Send>;
 
-/// An agent CLI started as the terminal's own process and the shell that follows it.
+/// An agent CLI started as the terminal's own process and the shell that follows it (Windows only).
+#[cfg_attr(not(windows), allow(dead_code))]
 struct Direct {
     agent: AgentLaunch,
     kind: ShellKind,
