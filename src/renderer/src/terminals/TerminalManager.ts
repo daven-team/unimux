@@ -32,6 +32,7 @@ import { finalReplaySize, replaySegments, writeReplaySegments, type ReplaySize }
 import { cursorOffset, reflowedCursor, type WrapBuffer } from '../../../shared/cursorReflow';
 import { coalesceViewportSync, type ViewportUnsync } from '../../../shared/viewportSync';
 import { showsLaunchLine, StartWatch, type StartScreen } from '../../../shared/startScreen';
+import { messageChannelPost, StagedQueue } from '../../../shared/stagedQueue';
 
 /** The background of a cell card (--card-bg in styles.css): a local terminal draws on the card itself (1.0.7). */
 export const CARD_BG = '#131313';
@@ -761,6 +762,7 @@ class TerminalManager {
       this.fitsQueued = true;
       queueMicrotask(() => this.flushFits());
     }
+    if (this.focusOnAttach === cellId) { this.focusOnAttach = null; e.term.focus(); }
   }
 
   /** Terminals attached in this task whose fit is still due (see attach). */
@@ -1208,7 +1210,30 @@ class TerminalManager {
   }
 
   focus(cellId: string): void {
-    this.entries.get(cellId)?.term.focus();
+    const e = this.entries.get(cellId);
+    if (e) e.term.focus();
+    // A cell whose terminal is still waiting for its turn (stage) takes the focus once it is shown.
+    else if (this.stages.has(cellId)) this.focusOnAttach = cellId;
+  }
+
+  /** The cell asked for the focus before its terminal existed (see focus). */
+  private focusOnAttach: string | null = null;
+
+  /**
+   * Terminals of cells that mount together (the first grid at startup, a grid opened for the first time) are created one per
+   * task (shared/stagedQueue.ts), the focused cell first: new Terminal + open (glyph measuring, a forced layout) + its WebGL
+   * context + the fit and the spawn, about 15-20 ms each, used to be one task of 350-400 ms for 20 cells. Each `run` creates,
+   * shows and starts its terminal in one go, so the pty still spawns at the size of its cell.
+   */
+  private stages = new StagedQueue(messageChannelPost());
+
+  /** Queues `run` (ensure + attach + start of one cell); returns the cancel for an unmount before its turn. */
+  stage(cellId: string, run: () => void, first: boolean): () => void {
+    const cancel = this.stages.add(cellId, run, first);
+    return () => {
+      cancel();
+      if (this.focusOnAttach === cellId && !this.stages.has(cellId)) this.focusOnAttach = null;
+    };
   }
 
   /** The xterm of a cell, for find in its scrollback (terminalFind.tsx reads the buffer and draws decorations). */

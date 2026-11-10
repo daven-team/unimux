@@ -28,7 +28,7 @@ import {
 import { PATH_MIME, type DropTarget } from '../../../shared/pathDrop';
 import type { PathMode } from '../../../shared/types';
 import { addDroppedFilesToCell, addPathsToCell, cellDropFormat, cellRefusesPaths, readDroppedPaths } from '../pathDrop';
-import { setUi, toast, update, useStore } from '../store';
+import { getUi, setUi, toast, update, useStore } from '../store';
 import { terminals } from '../terminals/TerminalManager';
 import { TerminalFind } from '../terminals/terminalFind';
 import { openMenu, openMenuAt, type MenuItem } from './ContextMenu';
@@ -100,16 +100,27 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
   // The terminal stopped feeding a shell with the mouse reports it was echoing (see termReset.ts).
   useEffect(() => terminals.onMouseFlood((id) => { if (id === cell.id) setFloodHint(true); }), [cell.id]);
 
+  // The theme the terminal gets when it is created later (a staged start below).
+  const themeRef = useRef(sshTheme);
+  themeRef.current = sshTheme;
+
   useEffect(() => {
     const el = bodyRef.current!;
     // Attach (and fit) before starting so the pty is spawned with the cell's real size.
-    ensureTerminal(cell.id);
-    terminals.attach(cell.id, el);
-    ensureStarted(cell.id, true);
-    return () => terminals.detach(cell.id, el);
+    const show = () => {
+      ensureTerminal(cell.id);
+      terminals.setTheme(cell.id, themeRef.current?.colors, themeRef.current?.minimumContrastRatio);
+      terminals.attach(cell.id, el);
+      ensureStarted(cell.id, true);
+    };
+    // A terminal that exists (a grid shown again) is shown in this commit; a new one waits for its own task, the focused cell
+    // first, so a grid of new terminals is not one long task (TerminalManager.stage).
+    if (terminals.has(cell.id)) { show(); return () => terminals.detach(cell.id, el); }
+    const cancel = terminals.stage(cell.id, show, getUi().focusedCellId === cell.id);
+    return () => { cancel(); terminals.detach(cell.id, el); };
   }, [cell.id, epoch]);
 
-  // After the attach above (the terminal exists by then); a theme changed in the settings or on the host repaints at once.
+  // After the attach above (or before it: the staged start applies the theme itself); a theme changed in the settings or on the host repaints at once.
   useEffect(() => { terminals.setTheme(cell.id, sshTheme?.colors, sshTheme?.minimumContrastRatio); }, [cell.id, epoch, sshTheme]);
 
   const markFocused = () => {
