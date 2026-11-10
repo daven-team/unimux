@@ -278,8 +278,16 @@ fn finds_the_program_the_shell_would_run() {
     std::fs::remove_file(pa.join("claude.cmd")).unwrap();
     assert_eq!(find_cli("claude", Shell::Pwsh, &env, cwd.path()), None, "a lone .ps1");
     assert_eq!(find_cli("claude", Shell::Cmd, &env, cwd.path()), Some(CliProgram::Exe(pb.join("claude.exe"))));
+    // A program in the working folder (a project folder: untrusted) is never started directly; cmd.exe would run it first,
+    // so the typed launch line stays.
     std::fs::write(cwd.path().join("claude.bat"), "").unwrap();
-    assert_eq!(find_cli("claude", Shell::Cmd, &env, cwd.path()), Some(CliProgram::Batch(cwd.path().join("claude.bat"))));
+    assert_eq!(find_cli("claude", Shell::Cmd, &env, cwd.path()), None);
+    std::fs::remove_file(cwd.path().join("claude.bat")).unwrap();
+    std::fs::write(cwd.path().join("claude.exe"), "").unwrap();
+    assert_eq!(find_cli("claude", Shell::Cmd, &env, cwd.path()), None);
+    std::fs::remove_file(cwd.path().join("claude.exe")).unwrap();
+    assert_eq!(find_cli("claude", Shell::Cmd, &env, cwd.path()), Some(CliProgram::Exe(pb.join("claude.exe"))));
+    std::fs::write(cwd.path().join("claude.bat"), "").unwrap();
     assert_eq!(find_cli("claude", Shell::Pwsh, &env, cwd.path()), None, "PowerShell does not look into the folder");
     // An .exe next to a .ps1 is ambiguous; a .com (first in PATHEXT) is not a program this starts.
     std::fs::write(pa.join("claude.exe"), "").unwrap();
@@ -291,6 +299,28 @@ fn finds_the_program_the_shell_would_run() {
     // Not on the PATH (a profile may add it), or a POSIX shell.
     assert_eq!(find_cli("codex", Shell::Pwsh, &env, cwd.path()), None);
     assert_eq!(find_cli("claude", Shell::Bash, &env, cwd.path()), None);
+}
+
+#[test]
+fn relative_and_empty_path_entries_never_pick_the_program() {
+    let (abs, cwd) = (dir(), dir());
+    std::fs::write(abs.path().join("claude.exe"), "").unwrap();
+    // A relative entry (it resolves against the working folder) that holds the name: the typed line stays.
+    let rel = cwd.path().join("tools");
+    std::fs::create_dir_all(&rel).unwrap();
+    std::fs::write(rel.join("claude.exe"), "").unwrap();
+    for entry in ["tools", ".\\tools"] {
+        let env = vec![("PATH".to_string(), format!(";;{entry};{}", abs.path().display()))];
+        assert_eq!(find_cli("claude", Shell::Pwsh, &env, cwd.path()), None, "{entry}");
+        assert_eq!(find_cli("claude", Shell::Cmd, &env, cwd.path()), None, "{entry}");
+        // A relative entry that holds nothing is passed over.
+        let other = dir();
+        assert_eq!(find_cli("claude", Shell::Pwsh, &env, other.path()), Some(CliProgram::Exe(abs.path().join("claude.exe"))));
+    }
+    // Empty entries are skipped; a drive-relative entry is not absolute.
+    let env = vec![("PATH".to_string(), format!(" ; \"\" ;{}", abs.path().display()))];
+    assert_eq!(find_cli("claude", Shell::Pwsh, &env, cwd.path()), Some(CliProgram::Exe(abs.path().join("claude.exe"))));
+    assert!(!std::path::Path::new("C:tools").is_absolute());
 }
 
 #[test]

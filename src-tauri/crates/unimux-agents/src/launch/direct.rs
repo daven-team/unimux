@@ -9,6 +9,7 @@
 //!
 //! and anything else falls back to the launch line typed into the shell: a PowerShell script (`.ps1`) that is not the
 //! sibling of an npm `.cmd` shim, another kind of program, a CLI that is not on the PATH (a profile may add it, or an alias),
+//! a CLI the shell would take from the working folder or a relative PATH entry (never trusted for a direct start),
 //! profile arguments in shell syntax (quotes, variables, operators: only the shell knows what they mean), an argument cmd.exe
 //! would expand (`%`, `!`) or cannot pass (a line break, a double quote) on the way through a shim, a command line that is too
 //! long, and the POSIX shells.
@@ -175,16 +176,27 @@ fn path_exts(env: &[(String, String)]) -> Vec<String> {
         .collect()
 }
 
-/// The folders a lookup searches: the PATH entries (quotes around one removed); cmd.exe looks into its current folder first.
-fn search_dirs(env: &[(String, String)], shell: Shell, cwd: &Path) -> Vec<PathBuf> {
+/// The folders a lookup searches, in order, each with whether a program found there may be started directly: cmd.exe looks
+/// into its current folder first, then come the PATH entries (quotes around one removed, empty ones skipped). The working
+/// folder (a project, possibly someone else's) and relative PATH entries (they resolve against it) are never trusted: a hit
+/// there keeps the typed launch line, so the program is never picked from an untrusted search path here.
+fn search_dirs(env: &[(String, String)], shell: Shell, cwd: &Path) -> Vec<(PathBuf, bool)> {
     let mut dirs = Vec::new();
     if shell == Shell::Cmd {
-        dirs.push(cwd.to_path_buf());
+        dirs.push((cwd.to_path_buf(), false));
     }
     for entry in env_var(env, "PATH").unwrap_or("").split(';') {
-        let entry = entry.trim().trim_matches('"');
-        if !entry.is_empty() {
-            dirs.push(PathBuf::from(entry));
+        let entry = entry.trim().trim_matches('"').trim();
+        if entry.is_empty() {
+            continue;
+        }
+        let dir = PathBuf::from(entry);
+        // `C:\x` and `\\server\share\x` only: not `x`, `.\x` or a drive-relative `C:x` (looked up where the shell would,
+        // in the cell's folder, only to see that the shell would run something from there).
+        if dir.is_absolute() {
+            dirs.push((dir, true));
+        } else {
+            dirs.push((cwd.join(dir), false));
         }
     }
     dirs
@@ -199,7 +211,7 @@ fn is_npm_shim(file: &Path) -> bool {
 /// can start the same way: PowerShell picks a `.ps1` before the PATHEXT programs of the same folder, cmd.exe takes the first
 /// PATHEXT match and searches its current folder first. Only `.exe` and `.cmd` / `.bat` qualify; a `.ps1` qualifies only as
 /// the sibling of an npm `.cmd` shim (both start the same script), and a folder that holds an `.exe` next to a `.ps1` is
-/// ambiguous.
+/// ambiguous. A first match in the working folder or a relative PATH entry is never started directly (see [`search_dirs`]).
 pub fn find_cli(name: &str, shell: Shell, env: &[(String, String)], cwd: &Path) -> Option<CliProgram> {
     if !matches!(shell, Shell::Pwsh | Shell::Powershell | Shell::Cmd) {
         return None;
@@ -210,12 +222,15 @@ pub fn find_cli(name: &str, shell: Shell, env: &[(String, String)], cwd: &Path) 
         ".cmd" | ".bat" => Some(CliProgram::Batch(file)),
         _ => None,
     };
-    for dir in search_dirs(env, shell, cwd) {
+    for (dir, trusted) in search_dirs(env, shell, cwd) {
         let hits: Vec<(PathBuf, &str)> =
             exts.iter().map(|e| (dir.join(format!("{name}{e}")), e.as_str())).filter(|(f, _)| f.is_file()).collect();
         let ps1 = shell != Shell::Cmd && dir.join(format!("{name}.ps1")).is_file();
         if hits.is_empty() && !ps1 {
             continue;
+        }
+        if !trusted {
+            return None;
         }
         if !ps1 {
             let (file, ext) = hits.into_iter().next()?;
