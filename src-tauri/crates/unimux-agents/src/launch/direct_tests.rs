@@ -301,6 +301,8 @@ fn finds_the_program_the_shell_would_run() {
     assert_eq!(find_cli("claude", Shell::Bash, &env, cwd.path()), None);
 }
 
+// Windows path rules (`.\tools`, backslashes); the direct start runs on Windows only.
+#[cfg(windows)]
 #[test]
 fn relative_and_empty_path_entries_never_pick_the_program() {
     let (abs, cwd) = (dir(), dir());
@@ -392,6 +394,8 @@ fn an_exe_gets_its_arguments_back_exactly() {
     assert_eq!(direct_command(&exe, &[format!("x{}", "a".repeat(33_000))], Shell::Pwsh, &[]), None);
 }
 
+// Windows path rules (`.\tools`, backslashes); the direct start runs on Windows only.
+#[cfg(windows)]
 #[test]
 fn a_batch_shim_goes_through_cmd_with_its_arguments_quoted() {
     let shim = CliProgram::Batch(PathBuf::from("C:\\Users\\Jan Kowalski\\AppData\\Roaming\\npm\\codex.cmd"));
