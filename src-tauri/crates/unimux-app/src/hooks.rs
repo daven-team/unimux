@@ -183,8 +183,8 @@ impl Hooks {
         cell_files::remove_cell_files(&self.cell_files, cell, &Kind::ALL);
     }
 
-    /// The hook settings of a Claude spawn (index.ts cell:spawn): the version's hook form, command hooks once http hooks were
-    /// found blocked or when an `allowedHttpHookUrls` list (managed policy, user or project settings) does not allow
+    /// The hook settings of a Claude spawn (index.ts cell:spawn): the version's hook form, command hooks while http hooks
+    /// count as blocked in this run (see `HttpHookWatch`) or when an `allowedHttpHookUrls` list (managed policy, user or project settings) does not allow
     /// 127.0.0.1; writes `hooks/claude-<cell>.json` (a fresh nonce) and starts watching the cell. `env` is the cell's
     /// environment (CLAUDE_CONFIG_DIR, ProgramFiles), `version` the `claude --version` its PATH starts.
     pub fn claude_spawn(
@@ -324,8 +324,8 @@ fn watch_hooks(ctx: &Arc<AppContext>) {
     }));
 }
 
-/// Before any cell can start: files of removed cells (in no grid and not in the archive) and every old startup prompt go
-/// (index.ts `pruneCellFiles`). W7's startup runs it as its cell file prune step next to the hook and MCP servers and marks
+/// Before any cell can start: files of removed cells (in no grid and not in the archive), the dead hook settings of archived
+/// cells and every old startup prompt go (index.ts `pruneCellFiles`). W7's startup runs it as its cell file prune step next to the hook and MCP servers and marks
 /// `cell-files-pruned` when it ended (also after a failure).
 fn register_cell_file_prune(ctx: &Arc<AppContext>) {
     let weak: Weak<AppContext> = Arc::downgrade(ctx);
@@ -333,9 +333,10 @@ fn register_cell_file_prune(ctx: &Arc<AppContext>) {
         let weak = weak.clone();
         Box::pin(async move {
             let Some(ctx) = weak.upgrade() else { return };
-            let keep = cell_files::cell_ids_of(&ctx.state.get(), false);
+            let state = ctx.state.get();
+            let (keep, open) = (cell_files::cell_ids_of(&state, false), cell_files::cell_ids_of(&state, true));
             let dirs = ctx.hooks.cell_files.clone();
-            let _ = tauri::async_runtime::spawn_blocking(move || cell_files::prune_cell_files(&dirs, &keep)).await;
+            let _ = tauri::async_runtime::spawn_blocking(move || cell_files::prune_cell_files(&dirs, &keep, &open)).await;
             ctx.hooks.pruned.send_replace(true);
         })
     }));
@@ -484,7 +485,7 @@ mod tests {
     }
 
     #[test]
-    fn the_watch_hears_hooks_of_cells_of_the_state_and_a_remembered_fallback_gives_command_hooks() {
+    fn the_watch_hears_hooks_of_cells_of_the_state_and_a_remembered_fallback_no_longer_gives_command_hooks() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join(FALLBACK_FILE), r#"{"claudeVersion":"2.1.300"}"#).unwrap();
         let ctx = context(dir.path(), one_claude_cell());
@@ -492,7 +493,8 @@ mod tests {
         // cell:runtime feeds the watch (index.ts `hookWatch.status`).
         assert!(ctx.cells.report()["hooks"]["runtime"].as_array().unwrap().contains(&serde_json::json!("hookWatch")));
         let cwd = dir.path().display().to_string();
-        assert_eq!(stop_type(&ctx.hooks.claude_spawn("c1", Some("2.1.300"), &[], &cwd).unwrap()), "command");
+        // Each app start tries http hooks again, also for the version an earlier run fell back for.
+        assert_eq!(stop_type(&ctx.hooks.claude_spawn("c1", Some("2.1.300"), &[], &cwd).unwrap()), "http");
         assert_eq!(stop_type(&ctx.hooks.claude_spawn("c1", Some("2.1.301"), &[], &cwd).unwrap()), "http");
         // A SessionStart, then "working" from output: the grace timer runs; an http hook of the cell ends the watch, a hook
         // of a cell that is not in the state does not.
@@ -586,7 +588,8 @@ mod tests {
             n.sort();
             n
         };
-        assert_eq!(names(&d.hooks), ["claude-c1.json", "claude-old.json"]);
+        // The archived cell keeps its MCP file; its hook settings are dead (per-run token) and a spawn writes them again.
+        assert_eq!(names(&d.hooks), ["claude-c1.json"]);
         assert_eq!(names(&d.mcp), ["c1.json", "old.json"]);
         assert!(names(&d.prompts).is_empty());
         // A running process keeps its files; once it is gone they go with the cell.

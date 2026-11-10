@@ -4,10 +4,13 @@
 //! error: a managed `allowedHttpHookUrls` policy that does not allow 127.0.0.1, and a cell that runs an older `claude` than
 //! the detected one. SessionStart stays a curl command in every form, so it still arrives. [`HttpHookWatch`] notices a cell
 //! that works (output-driven "working") for [`HTTP_HOOK_GRACE_MS`] after its SessionStart without a single http hook,
-//! switches every later Claude spawn back to command hooks and remembers that for this claude version in
-//! `claude-hook-fallback.json` (a new version tries http hooks again); the app shows one `app:notice` per run.
+//! switches every later Claude spawn of this run back to command hooks and writes the version to
+//! `claude-hook-fallback.json`. An http hook that arrives later from any cell still on http hooks proves them working and
+//! ends the fallback. Each app start tries http hooks again (1.1.4 kept the remembered version on command hooks for good,
+//! so one cell that only looked busy for 20 s, e.g. right after a restart, cost every later run 3-4 process starts per tool
+//! call); the file only keeps the notice from showing again for the same version, once per run at most.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
@@ -39,10 +42,10 @@ pub type SaveFallback = Box<dyn Fn(&str) -> io::Result<()> + Send + Sync>;
 
 /// What the watch needs from the app (`HttpHookWatchDeps`).
 pub struct HttpHookWatchDeps {
-    /// The version that fell back (persisted), or None; read once.
+    /// The version that fell back before (persisted), or None; read once, only to not show the notice again.
     pub load: LoadFallback,
     pub save: SaveFallback,
-    /// Called once per app run, when http hooks are found blocked.
+    /// Called at most once per app run, when http hooks are found blocked (not again for the remembered version).
     pub on_fallback: Box<dyn Fn() + Send + Sync>,
     pub timers: Arc<dyn Timers>,
 }
@@ -59,8 +62,10 @@ struct Inner {
     cells: HashMap<String, Watched>,
     /// The cell's claude version at its spawn (what a fallback is remembered for).
     versions: HashMap<String, Option<String>>,
-    /// None = not loaded yet (`undefined`), Some(None) = nothing remembered (`null`).
-    blocked_for: Option<Option<String>>,
+    /// Cells whose current process posts http hooks (watched or not): an http hook of one proves http hooks work.
+    http_cells: HashSet<String>,
+    /// The version a fallback of an earlier run was remembered for. None = not loaded yet, Some(None) = nothing remembered.
+    remembered: Option<Option<String>>,
     blocked_now: bool,
     hinted: bool,
     generation: u64,
@@ -78,17 +83,15 @@ impl HttpHookWatch {
         Arc::new_cyclic(|me| Self { deps, inner: Mutex::new(Inner::default()), me: me.clone() })
     }
 
-    fn blocked(&self, inner: &mut Inner, version: Option<&str>) -> bool {
-        if inner.blocked_now {
-            return true;
-        }
-        let remembered = inner.blocked_for.get_or_insert_with(|| (self.deps.load)());
-        remembered.as_deref() == Some(version.unwrap_or(""))
+    /// The hook form a Claude spawn gets: the version's form, or command hooks while http hooks count as blocked in this
+    /// run. A fallback remembered by an earlier run does not count: every app start tries http hooks again.
+    pub fn form_for(&self, form: ClaudeHookForm, _version: Option<&str>) -> ClaudeHookForm {
+        if form != ClaudeHookForm::Shell && self.inner.lock().blocked_now { ClaudeHookForm::Shell } else { form }
     }
 
-    /// The hook form a Claude spawn gets: the version's form, or command hooks once http hooks were found blocked.
-    pub fn form_for(&self, form: ClaudeHookForm, version: Option<&str>) -> ClaudeHookForm {
-        if form != ClaudeHookForm::Shell && self.blocked(&mut self.inner.lock(), version) { ClaudeHookForm::Shell } else { form }
+    /// True while later Claude spawns of this run get command hooks.
+    pub fn blocked_now(&self) -> bool {
+        self.inner.lock().blocked_now
     }
 
     /// A Claude cell starts (again) with `form`; only http forms are watched.
@@ -96,8 +99,10 @@ impl HttpHookWatch {
         let mut inner = self.inner.lock();
         self.forget_locked(&mut inner, cell_id);
         if form == ClaudeHookForm::Shell {
+            inner.http_cells.remove(cell_id);
             return;
         }
+        inner.http_cells.insert(cell_id.to_string());
         inner.generation += 1;
         let generation = inner.generation;
         inner.cells.insert(cell_id.to_string(), Watched { generation, session_started: false, timer: None });
@@ -107,6 +112,11 @@ impl HttpHookWatch {
     /// A hook of the cell arrived; everything but SessionStart travels as an http hook in the http forms.
     pub fn hook(&self, cell_id: &str, event: &str) {
         let mut inner = self.inner.lock();
+        // Every hook but SessionStart of a process on http hooks came as an http hook: they work, the fallback ends (it was
+        // a cell that only looked busy). The cell's watch may be over already (its grace ran out), its process still counts.
+        if event != "session" && inner.http_cells.contains(cell_id) {
+            inner.blocked_now = false;
+        }
         let Some(cell) = inner.cells.get_mut(cell_id) else { return };
         if event == "session" {
             cell.session_started = true;
@@ -156,8 +166,11 @@ impl HttpHookWatch {
             }
             let version = inner.versions.get(cell_id).cloned().flatten().unwrap_or_default();
             inner.blocked_now = true;
-            inner.blocked_for = Some(Some(version.clone()));
-            let hint = !inner.hinted;
+            let remembered = inner.remembered.get_or_insert_with(|| (self.deps.load)());
+            // The notice already showed for this version in an earlier run: the run falls back without it.
+            let known = remembered.as_deref() == Some(version.as_str());
+            *remembered = Some(version.clone());
+            let hint = !inner.hinted && !known;
             inner.hinted = true;
             self.forget_locked(&mut inner, cell_id);
             (version, hint)
@@ -178,7 +191,9 @@ impl HttpHookWatch {
 
     /// The cell's process is gone.
     pub fn forget(&self, cell_id: &str) {
-        self.forget_locked(&mut self.inner.lock(), cell_id);
+        let mut inner = self.inner.lock();
+        inner.http_cells.remove(cell_id);
+        self.forget_locked(&mut inner, cell_id);
     }
 }
 
@@ -445,31 +460,77 @@ mod tests {
     }
 
     #[test]
-    fn remembers_the_fallback_per_claude_version_across_app_runs_a_new_version_tries_http_hooks_again() {
+    fn a_fallback_remembered_by_an_earlier_run_never_sticks_each_app_start_tries_http_hooks_again() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join(FALLBACK_FILE);
         assert_eq!(load_fallback(&file), None);
-        save_fallback(&file, "2.1.200").unwrap();
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), r#"{"claudeVersion":"2.1.200"}"#);
-        let (load, save) = fallback_store(file);
+        save_fallback(&file, "2.1.321").unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), r#"{"claudeVersion":"2.1.321"}"#);
+        let (load, save) = fallback_store(file.clone());
+        let notices = Arc::new(Mutex::new(0));
+        let n = notices.clone();
+        let timers = Arc::new(FakeTimers::default());
         let next = HttpHookWatch::new(HttpHookWatchDeps {
             load,
             save,
-            on_fallback: Box::new(|| {}),
-            timers: Arc::new(FakeTimers::default()),
+            on_fallback: Box::new(move || *n.lock() += 1),
+            timers: timers.clone(),
         });
-        assert_eq!(next.form_for(Exec, Some("2.1.200")), Shell);
-        assert_eq!(next.form_for(Exec, Some("2.1.201")), Exec);
+        // 1.1.4 remembered 2.1.321 once and every later run gave 2.1.321 command hooks; now each start tries http again.
+        assert_eq!(next.form_for(Exec, Some("2.1.321")), Exec);
+        assert_eq!(next.form_for(Exec, None), Exec);
+        // Really blocked again in this run: command hooks from now on, the file stays, no second notice for the version.
+        next.spawned("a", Exec, Some("2.1.321"));
+        next.hook("a", "session");
+        next.status("a", "working", false);
+        timers.advance(HTTP_HOOK_GRACE_MS);
+        assert_eq!(next.form_for(Exec, Some("2.1.321")), Shell);
+        assert_eq!(*notices.lock(), 0);
+        assert_eq!(load_fallback(&file).as_deref(), Some("2.1.321"));
+    }
+
+    #[test]
+    fn an_http_hook_after_the_fallback_ends_it_a_cell_that_only_looked_busy_does_not_cost_the_run_its_http_hooks() {
+        let t = watch(None);
+        let w = &t.w;
+        w.spawned("a", Exec, Some("2.1.322"));
+        w.spawned("b", Exec, Some("2.1.322"));
+        w.hook("a", "session");
+        w.status("a", "working", false);
+        t.timers.advance(HTTP_HOOK_GRACE_MS);
+        assert!(w.blocked_now());
+        assert_eq!(w.form_for(Exec, Some("2.1.322")), Shell);
+        // A SessionStart (a curl command in every form) proves nothing.
+        w.hook("b", "session");
+        assert!(w.blocked_now());
+        // A cell respawned on command hooks proves nothing either.
+        w.spawned("c", Shell, Some("2.1.322"));
+        w.hook("c", "busy");
+        assert!(w.blocked_now());
+        // The cell whose grace ran out posts its first http hook late: http hooks work.
+        w.hook("a", "prompt");
+        assert!(!w.blocked_now());
+        assert_eq!(w.form_for(Exec, Some("2.1.322")), Exec);
+        // Gone processes do not count.
+        w.spawned("d", Exec, Some("2.1.322"));
+        w.hook("d", "session");
+        w.status("d", "working", false);
+        t.timers.advance(HTTP_HOOK_GRACE_MS);
+        assert!(w.blocked_now());
+        w.forget("a");
+        w.hook("a", "busy");
+        assert!(w.blocked_now());
+        assert_eq!(*t.notices.lock(), ["hint"], "one notice per run");
     }
 
     #[test]
     fn the_file_is_read_once_and_a_respawn_restarts_the_watch() {
         let t = watch(Some(""));
         let w = &t.w;
-        // A remembered fallback for an unknown version ("") matches a spawn without a version only.
-        assert_eq!(w.form_for(Exec, None), Shell);
+        // A remembered fallback (here for an unknown version, "") no longer picks the form; it is read at a fallback only.
+        assert_eq!(w.form_for(Exec, None), Exec);
         assert_eq!(w.form_for(Exec, Some("2.1.1")), Exec);
-        assert_eq!(*t.loads.lock(), 1);
+        assert_eq!(*t.loads.lock(), 0);
         // A respawn during the grace time: the old process's timer never fires for the new one.
         w.spawned("a", Http, Some("2.1.100"));
         w.hook("a", "session");

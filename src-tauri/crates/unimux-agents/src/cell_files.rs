@@ -137,9 +137,14 @@ pub fn remove_cell_files(dirs: &CellFileDirs, cell_id: &str, kinds: &[Kind]) {
     }
 }
 
-/// At startup, before any cell runs: hook and MCP files of cells that no longer exist (in any grid or the archive) go, and
-/// every startup prompt (a spawn writes its prompt again). Returns how many were removed (`pruneCellFiles`).
-pub fn prune_cell_files(dirs: &CellFileDirs, keep: &HashSet<String>) -> usize {
+/// At startup, before any cell runs: MCP files of cells that no longer exist (`keep`: in any grid or the archive) go, hook
+/// settings of cells outside `keep_hooks` (the open grids) go, and every startup prompt (a spawn writes its prompt again).
+/// Returns how many were removed (`pruneCellFiles`).
+///
+/// A hook settings file is dead once its run ended (the hook server's token is new each run, the nonce new each spawn) and
+/// every Claude spawn writes it again, so archived cells, which 1.1.4 kept them for, piled them up (76 files on a machine
+/// with 2 open cells). `keep_hooks` should be a subset of `keep`.
+pub fn prune_cell_files(dirs: &CellFileDirs, keep: &HashSet<String>, keep_hooks: &HashSet<String>) -> usize {
     let mut removed = 0;
     for kind in Kind::ALL {
         let Ok(entries) = std::fs::read_dir(dirs.dir(kind)) else { continue };
@@ -148,7 +153,12 @@ pub fn prune_cell_files(dirs: &CellFileDirs, keep: &HashSet<String>) -> usize {
             // A name that is not Unicode can never be a cell file.
             let Some(name) = name.to_str() else { continue };
             let Some(cell_id) = cell_of_file(kind, name) else { continue };
-            if kind != Kind::Prompts && keep.contains(cell_id) {
+            let kept = match kind {
+                Kind::Prompts => false,
+                Kind::Hooks => keep.contains(cell_id) && keep_hooks.contains(cell_id),
+                Kind::Mcp => keep.contains(cell_id),
+            };
+            if kept {
                 continue;
             }
             // In use: the next start.
@@ -222,10 +232,33 @@ mod tests {
         }
         std::fs::write(d.hooks.join("notes.txt"), "x").unwrap();
         let keep: HashSet<String> = ["kept".to_string()].into();
-        assert_eq!(prune_cell_files(&d, &keep), 4);
+        assert_eq!(prune_cell_files(&d, &keep, &keep), 4);
         assert_eq!(names(&d.hooks), ["claude-kept.json", "notes.txt"]);
         assert_eq!(names(&d.mcp), ["kept.json"]);
         assert!(names(&d.prompts).is_empty());
+    }
+
+    #[test]
+    fn at_startup_drops_the_dead_hook_settings_of_archived_cells_and_keeps_those_of_open_grids_and_every_kept_mcp_file() {
+        let (_root, d) = dirs();
+        for id in ["open", "archived", "gone"] {
+            std::fs::write(d.hooks.join(format!("claude-{id}.json")), "{}").unwrap();
+            std::fs::write(d.mcp.join(format!("{id}.json")), "{}").unwrap();
+        }
+        std::fs::write(d.hooks.join("hook-debug.log"), "x").unwrap();
+        let state = serde_json::json!({ "projects": [
+            { "tabs": [{ "cells": [{ "id": "open" }] }], "archive": [{ "cells": [{ "id": "archived" }] }] },
+        ] });
+        let (keep, open) = (cell_ids_of(&state, false), cell_ids_of(&state, true));
+        assert_eq!(prune_cell_files(&d, &keep, &open), 3);
+        assert_eq!(names(&d.hooks), ["claude-open.json", "hook-debug.log"]);
+        assert_eq!(names(&d.mcp), ["archived.json", "open.json"]);
+        // A second start removes nothing more; keep_hooks never keeps a file of a cell outside keep.
+        assert_eq!(prune_cell_files(&d, &keep, &open), 0);
+        let stray: HashSet<String> = ["open".to_string()].into();
+        assert_eq!(prune_cell_files(&d, &HashSet::new(), &stray), 3);
+        assert_eq!(names(&d.hooks), ["hook-debug.log"]);
+        assert!(names(&d.mcp).is_empty());
     }
 
     #[test]
@@ -257,7 +290,7 @@ mod tests {
         remove_cell_files(&d, "c1", &Kind::ALL);
         assert!(!d.hooks.join("claude-c1.json").exists());
         std::fs::remove_dir_all(&d.mcp).unwrap();
-        assert_eq!(prune_cell_files(&d, &HashSet::new()), 0);
+        assert_eq!(prune_cell_files(&d, &HashSet::new(), &HashSet::new()), 0);
     }
 
     // mcp-cell-config "removing the cell deletes its MCP config", "ending the cell MCP access (exit, kill, failed spawn, spawn
@@ -287,7 +320,7 @@ mod tests {
         std::fs::create_dir(d.hooks.join("claude-dir.json")).unwrap();
         std::fs::write(d.prompts.join("a b.txt"), "x").unwrap();
         remove_cell_files(&d, "../x", &Kind::ALL);
-        assert_eq!(prune_cell_files(&d, &HashSet::new()), 0);
+        assert_eq!(prune_cell_files(&d, &HashSet::new(), &HashSet::new()), 0);
         assert!(d.hooks.join("claude-dir.json").is_dir());
         assert!(d.prompts.join("a b.txt").exists());
     }
