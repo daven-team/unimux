@@ -25,7 +25,7 @@ import { mayAnswer, permissionAsk, permissionKeys, type PermissionAnswer, type P
 import { tr } from '../i18n';
 import { confirmTerminalLink } from '../terminalLinks';
 import { applyScrollback, DEFAULT_SCROLLBACK_LINES, maxWebglContexts, PENDING_OUTPUT_CHARS } from '../../../shared/terminalLimits';
-import { nextLossCount, pickPrewarm, planWebgl, webglPrewarmReserve, WEBGL_GRANT_BUDGET_MS, WEBGL_PREWARM_GAP_MS, WEBGL_PREWARM_IDLE_MS, WEBGL_PREWARM_QUIET_MS, webglBackoff, WebglLimit, type WebglCandidate } from '../../../shared/webglPool';
+import { nextLossCount, pickPrewarm, pickStale, planAttach, planWebgl, webglPrewarmReserve, WEBGL_GRANT_BUDGET_MS, WEBGL_PREWARM_GAP_MS, WEBGL_PREWARM_IDLE_MS, WEBGL_PREWARM_QUIET_MS, webglBackoff, WebglLimit, type WebglCandidate } from '../../../shared/webglPool';
 import { onWindowShown } from '../windowShown';
 import { webviewEngine } from '../platform';
 import { finalReplaySize, replaySegments, writeReplaySegments, type ReplaySize } from '../../../shared/replay';
@@ -216,6 +216,7 @@ class TerminalManager {
     // plan itself limits how often a context moves between cells on screen.
     setInterval(() => {
       if (this.webglLimit.recover(performance.now())) console.warn(`WebGL contexts limit raised to ${this.webglLimit.limit}`);
+      this.releaseStale();
       if (this.needsWebgl()) this.balanceWebgl();
       else if (this.windowShown && this.prewarmPick(performance.now())) this.schedulePrewarm();
     }, 1000);
@@ -731,7 +732,8 @@ class TerminalManager {
     e.attachedTo = el;
     e.shownAt = performance.now();
     e.host.style.display = this.windowShown ? '' : 'none';
-    if (!e.webgl) this.queueBalance();
+    // The context first, then the fit below: the first frame and the first fit are WebGL's (see grantOnAttach).
+    if (!this.grantOnAttach(e)) this.queueBalance();
     // Without a context the selection would be drawn twice (by the DOM renderer now, by WebGL a frame later): the balance
     // applies it once the terminal has its renderer (continueWebgl).
     if (e.parkedSelection && e.webgl) {
@@ -751,7 +753,9 @@ class TerminalManager {
     e.resizeObs.observe(el);
     // The fit waits until every terminal of this commit is in place (a microtask): fitting each one right after inserting it
     // made the browser lay out the page again for every cell (16 layouts, 26 ms, when a 16-cell grid came to the front).
-    // Whoever needs the size before that (a spawn, size(), xterm()) gets the fit first (flushFits).
+    // Whoever needs the size before that (a spawn, size(), xterm()) gets the fit first (flushFits). It also stands for the
+    // renderer fit a context granted above queued (refitForRenderer).
+    this.fitQueue.delete(e);
     this.pendingFits.add(e);
     if (!this.fitsQueued) {
       this.fitsQueued = true;
@@ -867,8 +871,47 @@ class TerminalManager {
     const focused = document.activeElement;
     return [...this.entries.values()].map((o) => ({
       id: o.id, hasWebgl: o.webgl !== null, attached: o.attachedTo !== null, shownAt: o.shownAt, focused: focused !== null && focused === o.term.textarea,
-      outputAt: o.outputAt, changedAt: o.webglChangedAt, blockedUntil: o.webglBlockedUntil,
+      outputAt: o.outputAt, changedAt: o.webglChangedAt, blockedUntil: o.webglBlockedUntil, keep: this.neighbours.has(o.id),
     }));
+  }
+
+  /** The cells of the grids next to the one on screen (webglPool.ts adjacentGridCells): they may hold a context while parked. */
+  private neighbours = new Set<string>();
+
+  setNeighbours(ids: readonly string[]): void {
+    if (ids.length === this.neighbours.size && ids.every((id) => this.neighbours.has(id))) return;
+    this.neighbours = new Set(ids);
+    this.schedulePrewarm();
+  }
+
+  /**
+   * Parked terminals not shown for WEBGL_PARKED_MS give their contexts back (webglPool.ts pickStale). Nothing on screen changes:
+   * a parked terminal is not drawn and not fitted, and showing it again creates its context before its first frame (attach).
+   */
+  private releaseStale(): void {
+    const now = performance.now();
+    for (const id of pickStale(this.webglCandidates(), now)) {
+      const e = this.entries.get(id);
+      if (!e?.webgl || e.attachedTo) continue;
+      this.releaseWebgl(e);
+      e.webglChangedAt = now;
+    }
+  }
+
+  /**
+   * A terminal shown without a context gets one now, before its fit and its first frame (webglPool.ts planAttach), so it is
+   * never drawn by the DOM renderer and never fitted at the DOM renderer's cell size (other columns, a pty resize). A parked
+   * terminal may give its context up for it. Returns false when it has to wait for the per-frame plan.
+   */
+  private grantOnAttach(e: Entry): boolean {
+    if (e.webgl || !this.windowShown) return e.webgl !== null;
+    const now = performance.now();
+    const plan = planAttach(this.webglCandidates(), e.id, this.webglLimit.limit, now);
+    if (!plan.grant) return false;
+    const victim = plan.release ? this.entries.get(plan.release) : undefined;
+    if (victim?.webgl && !victim.attachedTo) { this.releaseWebgl(victim); victim.webglChangedAt = now; }
+    this.createWebgl(e, now);
+    return e.webgl !== null;
   }
 
   private prewarmHandle = 0;
@@ -877,11 +920,11 @@ class TerminalManager {
   private prewarmRetry: number | undefined;
 
   /**
-   * Parked terminals (a grid not on screen, started in the background or shown before the window was minimized) get their
-   * context in idle time, one per idle callback, while plenty of the pool is free (webglPool.ts pickPrewarm). The first
-   * switch to their grid then draws through WebGL at once: without it every cell drew through xterm's DOM renderer (about
-   * 6 ms per cell and frame) until the contexts were created a few per frame. Shown terminals always come first: nothing is
-   * prewarmed while a plan still hands out contexts.
+   * Parked terminals of the grids next to the shown one (started in the background) and of grids shown in the last
+   * WEBGL_PARKED_MS (their contexts were given back while the window was minimized) get their context in idle time, one per
+   * idle callback, while plenty of the pool is free (webglPool.ts pickPrewarm); a grid nobody looked at gets none. Switching
+   * to their grid then costs nothing: without it the contexts are created in the task that shows the grid (grantOnAttach).
+   * Shown terminals always come first: nothing is prewarmed while a plan still hands out contexts.
    */
   private schedulePrewarm(): void {
     if (this.prewarmHandle || this.prewarmRetry !== undefined || typeof requestIdleCallback !== 'function') return;
@@ -1080,7 +1123,8 @@ class TerminalManager {
     this.pendingFits.delete(e);
     this.fitQueue.delete(e);
     e.shownAt = performance.now();
-    // The WebGL context stays with the parked terminal (xterm pauses it while hidden), so showing the grid again is instant.
+    // The WebGL context stays with the parked terminal (xterm pauses it while hidden), so showing the grid again is instant;
+    // after WEBGL_PARKED_MS out of sight it goes back (releaseStale) unless its grid is next to the shown one.
     this.parking.appendChild(e.host);
     e.attachedTo = null;
   }

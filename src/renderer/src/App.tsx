@@ -34,6 +34,7 @@ import { TabSwitcher } from './components/TabSwitcher';
 import { getS, getUi, setUi, toast, update, useStore } from './store';
 import { terminals } from './terminals/TerminalManager';
 import { isPermissionAnswer } from '../../shared/permissionAction';
+import { adjacentGridCells } from '../../shared/webglPool';
 // Rarely used screens load on demand: the editor alone (CodeMirror, language packs, Markdown preview) is about a third of the bundle.
 const loadAutomationPanel = () => import('./components/AutomationPanel').then((m) => ({ default: m.AutomationPanel }));
 const loadFileEditor = () => import('./components/FileEditor').then((m) => ({ default: m.FileEditor }));
@@ -148,6 +149,11 @@ async function bootRest(mcpInfo: Awaited<ReturnType<typeof window.mc.getMcpInfo>
   }));
   setUi({ missingPaths: missing, focusedCellId: activeTab(activeProject(state))?.cells[0]?.id ?? null });
   bootStep(() => refreshSessionTitles(activeProject(state)?.path));
+  // The grids next to the active one keep (or get, in idle time) the WebGL contexts of their parked terminals.
+  terminals.setNeighbours(adjacentGridCells(activeProject(state)));
+  useStore.subscribe((st, prev) => {
+    if (st.s.projects !== prev.s.projects || st.s.activeProjectId !== prev.s.activeProjectId) terminals.setNeighbours(adjacentGridCells(activeProject(st.s)));
+  });
   let lastProject = state.activeProjectId;
   useStore.subscribe((st) => {
     if (st.s.activeProjectId === lastProject) return;

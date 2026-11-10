@@ -18,6 +18,63 @@ export interface WebglCandidate {
   changedAt?: number;
   /** No new context before this time (a lost context backs off). */
   blockedUntil?: number;
+  /** A cell of a grid next to the one on screen (adjacentGridCells): likely shown next, so it may hold a context while parked. */
+  keep?: boolean;
+}
+
+/**
+ * A parked terminal not shown for this long gives its context back (each costs 2.3-3.9 MiB of GPU process memory plus video
+ * memory), unless its grid is next to the one on screen. Showing it again creates the context before the first frame
+ * (planAttach), so it is never drawn by the DOM renderer and keeps its columns and rows.
+ */
+export const WEBGL_PARKED_MS = 5 * 60_000;
+
+/** A parked terminal may hold a context: its grid is next to the shown one, or it was shown less than WEBGL_PARKED_MS ago. */
+function mayHoldParked(c: WebglCandidate, now: number): boolean {
+  return c.keep === true || (c.shownAt > 0 && now - c.shownAt < WEBGL_PARKED_MS);
+}
+
+/** Parked terminals whose context goes back now: not shown for WEBGL_PARKED_MS (or never) and not in a grid next to the shown one. */
+export function pickStale(candidates: readonly WebglCandidate[], now: number): string[] {
+  return candidates.filter((c) => c.hasWebgl && !c.attached && !mayHoldParked(c, now)).map((c) => c.id);
+}
+
+/**
+ * A terminal about to be shown without a context gets one at once, before its first frame and before its fit: from a free
+ * slot, else from the least recently shown parked terminal. So a grid shown again (its contexts given back after
+ * WEBGL_PARKED_MS or while the window was minimized) is drawn by WebGL from its first frame, at WebGL's cell size: the
+ * DOM renderer measures a wider cell (7.61 px against 7 at 100 percent), and a fit done while it drew would change the
+ * column count and resize the pty. Only when every context is on screen (or the terminal backs off) does it wait for the
+ * per-frame plan (planWebgl).
+ */
+export function planAttach(candidates: readonly WebglCandidate[], id: string, limit: number, now: number): { grant: boolean; release: string | null } {
+  const self = candidates.find((c) => c.id === id);
+  if (!self || self.hasWebgl || (self.blockedUntil !== undefined && self.blockedUntil > now)) return { grant: false, release: null };
+  let held = 0;
+  let victim: WebglCandidate | null = null;
+  for (const c of candidates) {
+    if (!c.hasWebgl) continue;
+    held++;
+    if (!c.attached && c.id !== id && (!victim || c.shownAt < victim.shownAt)) victim = c;
+  }
+  if (held < limit) return { grant: true, release: null };
+  return victim ? { grant: true, release: victim.id } : { grant: false, release: null };
+}
+
+/**
+ * The cells of the grids right before and after the active one in its project (what Ctrl+Tab and the strip show next): they
+ * may keep or get a context while parked (pickPrewarm, pickStale).
+ */
+export function adjacentGridCells(project: { activeTabId: string | null; tabs: ReadonlyArray<{ id: string; cells: ReadonlyArray<{ id: string }> }> } | null): string[] {
+  if (!project) return [];
+  const at = project.tabs.findIndex((t) => t.id === project.activeTabId);
+  if (at < 0) return [];
+  const out: string[] = [];
+  for (const i of [at + 1, at - 1]) {
+    const tab = project.tabs[i];
+    if (tab) for (const cell of tab.cells) out.push(cell.id);
+  }
+  return out;
 }
 
 /**
@@ -44,7 +101,8 @@ const settled = (c: WebglCandidate, now: number) => c.changedAt === undefined ||
  * rank (focused, then busy, then quiet): first from free slots, then from parked terminals (least recently shown first), and
  * only then from an on-screen terminal of a lower rank. Taking one from the screen happens at most once per plan, only from a
  * terminal that held its context for WEBGL_HOLD_MS and for a terminal that did not just lose one, so a plan run every second
- * swaps at most one context per second and never the same cell back and forth. Parked terminals keep theirs while slots are free.
+ * swaps at most one context per second and never the same cell back and forth. Parked terminals keep theirs while slots are free
+ * (and while pickStale leaves them).
  */
 export function planWebgl(candidates: readonly WebglCandidate[], limit: number, now: number): { grant: string[]; release: string[] } {
   const grant: string[] = [];
@@ -102,10 +160,11 @@ export const WEBGL_PREWARM_QUIET_MS = 2000;
 export const WEBGL_PREWARM_GAP_MS = 250;
 
 /**
- * The parked terminal that gets a context next in idle time, or null: one that has none and is not backing off, the most
- * recently shown first (never shown ones in the order given, the order the cells were created), while fewer than
- * `limit - reserve` contexts exist (`reserve` from webglPrewarmReserve). Showing its grid later then finds the context ready
- * instead of drawing through the DOM renderer while contexts are created a few per frame.
+ * The parked terminal that gets a context next in idle time, or null: one that has none, is not backing off and may hold one
+ * while parked (a cell of a grid next to the shown one, or shown less than WEBGL_PARKED_MS ago; never a grid nobody looked
+ * at), the most recently shown first (never shown ones in the order given), while fewer than `limit - reserve` contexts exist
+ * (`reserve` from webglPrewarmReserve). Showing its grid later then finds the context ready instead of creating it in the
+ * task that shows the grid (planAttach).
  */
 export function pickPrewarm(candidates: readonly WebglCandidate[], limit: number, now: number, reserve = WEBGL_PREWARM_RESERVE): string | null {
   let held = 0;
@@ -113,7 +172,7 @@ export function pickPrewarm(candidates: readonly WebglCandidate[], limit: number
   if (held >= limit - reserve) return null;
   let best: WebglCandidate | null = null;
   for (const c of candidates) {
-    if (c.attached || c.hasWebgl || (c.blockedUntil !== undefined && c.blockedUntil > now)) continue;
+    if (c.attached || c.hasWebgl || (c.blockedUntil !== undefined && c.blockedUntil > now) || !mayHoldParked(c, now)) continue;
     if (!best || c.shownAt > best.shownAt) best = c;
   }
   return best?.id ?? null;

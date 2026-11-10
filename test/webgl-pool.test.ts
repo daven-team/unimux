@@ -2,12 +2,14 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { CHROMIUM_WEBGL_CONTEXTS, MAX_WEBGL_CONTEXTS, MAX_WEBGL_CONTEXTS_WEBKIT, maxWebglContexts } from '../src/shared/terminalLimits';
 import { MAX_CELLS } from '../src/shared/layout';
-import { nextLossCount, pickPrewarm, planWebgl, WEBGL_BUSY_MS, WEBGL_EVICT_MS, WEBGL_HEALTHY_MS, WEBGL_HOLD_MS, WEBGL_MIN_LIMIT, WEBGL_PREWARM_RESERVE, WEBGL_RECOVER_MS, webglBackoff, WebglLimit, webglPrewarmReserve, type WebglCandidate } from '../src/shared/webglPool';
+import { adjacentGridCells, nextLossCount, pickPrewarm, pickStale, planAttach, planWebgl, WEBGL_PARKED_MS, WEBGL_BUSY_MS, WEBGL_EVICT_MS, WEBGL_HEALTHY_MS, WEBGL_HOLD_MS, WEBGL_MIN_LIMIT, WEBGL_PREWARM_RESERVE, WEBGL_RECOVER_MS, webglBackoff, WebglLimit, webglPrewarmReserve, type WebglCandidate } from '../src/shared/webglPool';
 
 const NOW = 100_000;
 const c = (id: string, hasWebgl: boolean, attached: boolean, extra: Partial<WebglCandidate> = {}): WebglCandidate => ({ id, hasWebgl, attached, shownAt: 0, ...extra });
 const busy = { outputAt: NOW - 100 };
 const old = { changedAt: NOW - WEBGL_HOLD_MS - 1 };
+const kept = { keep: true };
+const LATER = 10 * WEBGL_PARKED_MS;
 
 describe('WebGL context pool', () => {
   it('serves a shown terminal from a free slot', () => {
@@ -160,8 +162,8 @@ describe('WebGL context pool', () => {
     expect(source).not.toMatch(/\.webgl\?\.dispose\(\)/);
   });
 
-  it('prewarms the most recently shown parked terminal, never shown ones in their order, none on screen or backing off', () => {
-    const all = [c('shown', false, true), c('n1', false, false), c('n2', false, false), c('back', false, false, { shownAt: 9, blockedUntil: NOW + 1 }), c('held', true, false, { shownAt: 8 })];
+  it('prewarms the most recently shown parked terminal, never shown ones of the next grids in their order, none on screen or backing off', () => {
+    const all = [c('shown', false, true), c('n1', false, false, kept), c('n2', false, false, kept), c('back', false, false, { shownAt: 9, blockedUntil: NOW + 1 }), c('held', true, false, { shownAt: 8 })];
     expect(pickPrewarm(all, 64, NOW)).toBe('n1');
     expect(pickPrewarm([...all, c('recent', false, false, { shownAt: 5 })], 64, NOW)).toBe('recent');
     expect(pickPrewarm([c('shown', false, true)], 64, NOW)).toBeNull();
@@ -170,9 +172,9 @@ describe('WebGL context pool', () => {
   it('prewarming leaves room for a full grid, and does nothing when the limit was lowered', () => {
     const held = (n: number) => Array.from({ length: n }, (_, i) => c(`h${i}`, true, i < 4));
     expect(WEBGL_PREWARM_RESERVE).toBeGreaterThanOrEqual(MAX_CELLS);
-    expect(pickPrewarm([...held(MAX_WEBGL_CONTEXTS - WEBGL_PREWARM_RESERVE - 1), c('p', false, false)], MAX_WEBGL_CONTEXTS, NOW)).toBe('p');
-    expect(pickPrewarm([...held(MAX_WEBGL_CONTEXTS - WEBGL_PREWARM_RESERVE), c('p', false, false)], MAX_WEBGL_CONTEXTS, NOW)).toBeNull();
-    expect(pickPrewarm([...held(4), c('p', false, false)], 16, NOW)).toBeNull();
+    expect(pickPrewarm([...held(MAX_WEBGL_CONTEXTS - WEBGL_PREWARM_RESERVE - 1), c('p', false, false, kept)], MAX_WEBGL_CONTEXTS, NOW)).toBe('p');
+    expect(pickPrewarm([...held(MAX_WEBGL_CONTEXTS - WEBGL_PREWARM_RESERVE), c('p', false, false, kept)], MAX_WEBGL_CONTEXTS, NOW)).toBeNull();
+    expect(pickPrewarm([...held(4), c('p', false, false, kept)], 16, NOW)).toBeNull();
   });
 
   it('Chromium keeps the 1.1.4 reserve; WebKit, whose pool is smaller than a full grid, keeps half of it free instead', () => {
@@ -184,19 +186,165 @@ describe('WebGL context pool', () => {
     const reserve = webglPrewarmReserve('webkit', limit);
     expect(reserve).toBe(6);
     // With the fixed reserve WebKit would never prewarm (12 - 20 < 0).
-    expect(pickPrewarm([c('p', false, false)], limit, NOW)).toBeNull();
-    expect(pickPrewarm([c('p', false, false)], limit, NOW, reserve)).toBe('p');
-    expect(pickPrewarm([...held(limit - reserve - 1), c('p', false, false)], limit, NOW, reserve)).toBe('p');
-    expect(pickPrewarm([...held(limit - reserve), c('p', false, false)], limit, NOW, reserve)).toBeNull();
+    expect(pickPrewarm([c('p', false, false, kept)], limit, NOW)).toBeNull();
+    expect(pickPrewarm([c('p', false, false, kept)], limit, NOW, reserve)).toBe('p');
+    expect(pickPrewarm([...held(limit - reserve - 1), c('p', false, false, kept)], limit, NOW, reserve)).toBe('p');
+    expect(pickPrewarm([...held(limit - reserve), c('p', false, false, kept)], limit, NOW, reserve)).toBeNull();
     // A pool lowered by evictions keeps prewarming, with half of it free.
     expect(webglPrewarmReserve('webkit', 8)).toBe(4);
-    expect(pickPrewarm([...held(3), c('p', false, false)], 8, NOW, webglPrewarmReserve('webkit', 8))).toBe('p');
-    expect(pickPrewarm([...held(4), c('p', false, false)], 8, NOW, webglPrewarmReserve('webkit', 8))).toBeNull();
+    expect(pickPrewarm([...held(3), c('p', false, false, kept)], 8, NOW, webglPrewarmReserve('webkit', 8))).toBe('p');
+    expect(pickPrewarm([...held(4), c('p', false, false, kept)], 8, NOW, webglPrewarmReserve('webkit', 8))).toBeNull();
   });
 
   it('TerminalManager prewarms with the reserve of its engine', () => {
     const source = readFileSync('src/renderer/src/terminals/TerminalManager.ts', 'utf8');
     expect(source).toMatch(/pickPrewarm\(this\.webglCandidates\(\), limit, now, webglPrewarmReserve\(webviewEngine\(\), limit\)\)/);
     expect(source.match(/pickPrewarm\(/g)).toHaveLength(1);
+  });
+
+  it('never prewarms a parked terminal nobody looked at, nor one shown more than WEBGL_PARKED_MS ago', () => {
+    expect(pickPrewarm([c('never', false, false)], 64, LATER)).toBeNull();
+    expect(pickPrewarm([c('stale', false, false, { shownAt: LATER - WEBGL_PARKED_MS })], 64, LATER)).toBeNull();
+    expect(pickPrewarm([c('recent', false, false, { shownAt: LATER - WEBGL_PARKED_MS + 1 })], 64, LATER)).toBe('recent');
+    expect(pickPrewarm([c('next', false, false, kept)], 64, LATER)).toBe('next');
+  });
+
+  it('parked terminals not shown for WEBGL_PARKED_MS give their context back, unless their grid is next to the shown one', () => {
+    const all = [
+      c('shown', true, true, { shownAt: LATER - WEBGL_PARKED_MS - 1 }),
+      c('old', true, false, { shownAt: LATER - WEBGL_PARKED_MS }),
+      c('never', true, false),
+      c('recent', true, false, { shownAt: LATER - 1000 }),
+      c('next', true, false, { shownAt: 5, keep: true }),
+      c('none', false, false, { shownAt: LATER - WEBGL_PARKED_MS - 1 }),
+    ];
+    expect(pickStale(all, LATER)).toEqual(['old', 'never']);
+    // What pickStale gives back, pickPrewarm never takes again (no give-back and re-create loop).
+    const after = all.map((x) => (['old', 'never'].includes(x.id) ? { ...x, hasWebgl: false } : x));
+    expect(pickPrewarm(after, 64, LATER)).toBeNull();
+  });
+
+  it('a terminal being shown gets a context at once: a free slot, else the least recently shown parked one', () => {
+    expect(planAttach([c('a', false, true)], 'a', 4, NOW)).toEqual({ grant: true, release: null });
+    const full = [c('a', false, true), c('p1', true, false, { shownAt: 50 }), c('p2', true, false, { shownAt: 10 }), c('s', true, true)];
+    expect(planAttach(full, 'a', 3, NOW)).toEqual({ grant: true, release: 'p2' });
+    // Every context on screen: it waits for the per-frame plan; one that has one or backs off is left alone.
+    expect(planAttach([c('a', false, true), c('s', true, true)], 'a', 1, NOW)).toEqual({ grant: false, release: null });
+    expect(planAttach([c('a', true, true)], 'a', 4, NOW)).toEqual({ grant: false, release: null });
+    expect(planAttach([c('a', false, true, { blockedUntil: NOW + 1 })], 'a', 4, NOW)).toEqual({ grant: false, release: null });
+  });
+
+  it('the grids next to the active one are the tabs right before and after it', () => {
+    const tab = (id: string, ...cells: string[]) => ({ id, cells: cells.map((x) => ({ id: x })) });
+    const tabs = [tab('t1', 'a'), tab('t2', 'b', 'c'), tab('t3', 'd'), tab('t4', 'e')];
+    expect(adjacentGridCells({ activeTabId: 't2', tabs })).toEqual(['d', 'a']);
+    expect(adjacentGridCells({ activeTabId: 't1', tabs })).toEqual(['b', 'c']);
+    expect(adjacentGridCells({ activeTabId: 't4', tabs })).toEqual(['d']);
+    expect(adjacentGridCells({ activeTabId: 'gone', tabs })).toEqual([]);
+    expect(adjacentGridCells(null)).toEqual([]);
+  });
+
+  describe('columns and rows never change because of a renderer switch', () => {
+    // xterm's cell sizes: WebGL rounds the glyph width down to device pixels (WebglRenderer._updateDimensions), the DOM renderer
+    // keeps it as measured (DomRenderer._updateDimensions); both floor the line height the same way. FitAddon divides the box by them.
+    const CHAR = { width: 7.61, height: 15.4 };
+    const LINE_HEIGHT = 1.1;
+    const cell = (renderer: 'webgl' | 'dom', dpr: number) => ({
+      width: renderer === 'webgl' ? Math.floor(CHAR.width * dpr) / dpr : CHAR.width,
+      height: Math.floor(Math.ceil(CHAR.height * dpr) * LINE_HEIGHT) / dpr,
+    });
+    const BOX = { width: 610, height: 300 };
+    const fit = (renderer: 'webgl' | 'dom', dpr: number) => ({ cols: Math.floor(BOX.width / cell(renderer, dpr).width), rows: Math.floor(BOX.height / cell(renderer, dpr).height) });
+
+    /** A model of TerminalManager: attach (grantOnAttach, then the fit of the commit), detach, the 1 s tick and idle prewarm. */
+    class Sim {
+      terms = new Map<string, { hasWebgl: boolean; attached: boolean; shownAt: number; size: { cols: number; rows: number } | null; resizes: number; domFrames: number }>();
+      neighbours = new Set<string>();
+      constructor(readonly limit: number, readonly dpr: number) {}
+      cands(): WebglCandidate[] {
+        return [...this.terms].map(([id, t]) => ({ id, hasWebgl: t.hasWebgl, attached: t.attached, shownAt: t.shownAt, keep: this.neighbours.has(id) }));
+      }
+      add(ids: string[]) { for (const id of ids) this.terms.set(id, { hasWebgl: false, attached: false, shownAt: 0, size: null, resizes: 0, domFrames: 0 }); }
+      show(ids: string[], now: number) {
+        for (const id of ids) {
+          const t = this.terms.get(id)!;
+          t.attached = true;
+          t.shownAt = now;
+          const plan = planAttach(this.cands(), id, this.limit, now);
+          if (plan.release) this.terms.get(plan.release)!.hasWebgl = false;
+          if (plan.grant) t.hasWebgl = true;
+        }
+        // The fits of the commit (flushFits), then the first frame.
+        for (const id of ids) {
+          const t = this.terms.get(id)!;
+          const next = fit(t.hasWebgl ? 'webgl' : 'dom', this.dpr);
+          if (t.size && (t.size.cols !== next.cols || t.size.rows !== next.rows)) t.resizes++;
+          t.size = next;
+          if (!t.hasWebgl) t.domFrames++;
+        }
+      }
+      hide(ids: string[], now: number) { for (const id of ids) { const t = this.terms.get(id)!; t.attached = false; t.shownAt = now; } }
+      tick(now: number) {
+        for (const id of pickStale(this.cands(), now)) this.terms.get(id)!.hasWebgl = false;
+        for (let id = pickPrewarm(this.cands(), this.limit, now); id; id = pickPrewarm(this.cands(), this.limit, now)) this.terms.get(id)!.hasWebgl = true;
+      }
+    }
+    const grid = (name: string) => Array.from({ length: MAX_CELLS }, (_, i) => `${name}${i}`);
+
+    it('the DOM renderer would fit other columns into the same box (what the order attach-grant-fit avoids)', () => {
+      expect(fit('dom', 1).cols).not.toBe(fit('webgl', 1).cols);
+      expect(fit('dom', 1.25).cols).not.toBe(fit('webgl', 1.25).cols);
+    });
+
+    for (const [limit, dpr] of [[MAX_WEBGL_CONTEXTS, 1], [MAX_WEBGL_CONTEXTS, 1.25], [24, 1], [MAX_WEBGL_CONTEXTS_WEBKIT * 2, 2]] as const) {
+      it(`grids shown, parked for long, shown again: same size, no pty resize, no DOM frame (limit ${limit}, scale ${dpr})`, () => {
+        const sim = new Sim(limit, dpr);
+        const grids = [grid('a'), grid('b'), grid('c'), grid('d')];
+        for (const g of grids) sim.add(g);
+        const neighboursOf = (at: number) => [...(grids[at + 1] ?? []), ...(grids[at - 1] ?? [])];
+        let now = 1000;
+        let active = 0;
+        const go = (to: number) => {
+          sim.hide(grids[active], now);
+          active = to;
+          sim.neighbours = new Set(neighboursOf(active));
+          sim.show(grids[active], now);
+        };
+        sim.neighbours = new Set(neighboursOf(0));
+        sim.show(grids[0], now);
+        const first = new Map(grids.flat().map((id) => [id, sim.terms.get(id)!.size]));
+        // Visit every grid, wander around for an hour with the 1 s tick running, then come back to each.
+        const route = [1, 2, 3, 2, 3, 1, 0, 3, 0, 2, 1, 3, 0];
+        for (const to of route) {
+          for (let s = 0; s < 400; s += 10) { now += 10_000; sim.tick(now); }
+          go(to);
+          for (const id of grids[to]) if (!first.get(id)) first.set(id, sim.terms.get(id)!.size);
+        }
+        for (const [id, t] of sim.terms) {
+          expect(t.resizes, id).toBe(0);
+          expect(t.domFrames, id).toBe(0);
+          expect(t.size, id).toEqual(first.get(id));
+          expect(t.size, id).toEqual(fit('webgl', dpr));
+        }
+        // And the memory: a grid neither shown nor next to the shown one for WEBGL_PARKED_MS holds no context.
+        now += WEBGL_PARKED_MS;
+        sim.tick(now);
+        const holding = [...sim.terms].filter(([, t]) => t.hasWebgl).map(([id]) => id);
+        for (const id of holding) expect(grids[active].includes(id) || sim.neighbours.has(id), id).toBe(true);
+        expect(holding.length).toBeLessThanOrEqual(limit);
+      });
+    }
+  });
+
+  it('TerminalManager grants a shown terminal its context before it is fitted, and gives stale contexts back on its tick', () => {
+    const source = readFileSync('src/renderer/src/terminals/TerminalManager.ts', 'utf8');
+    const attach = source.slice(source.indexOf('  attach(cellId: string'), source.indexOf('  /** Terminals attached in this task'));
+    const grant = attach.indexOf('if (!this.grantOnAttach(e)) this.queueBalance();');
+    expect(grant).toBeGreaterThan(-1);
+    expect(grant).toBeLessThan(attach.indexOf('this.pendingFits.add(e);'));
+    expect(source).toMatch(/planAttach\(this\.webglCandidates\(\), e\.id, this\.webglLimit\.limit, now\)/);
+    expect(source).toMatch(/setInterval\(\(\) => \{[\s\S]{0,200}this\.releaseStale\(\);/);
+    // A parked terminal is never fitted, so giving its context back changes nothing it shows.
+    expect(source).toMatch(/private refitForRenderer\(e: Entry\): void \{\n\s*if \(!e\.attachedTo \|\| !this\.windowShown\) return;/);
   });
 });
