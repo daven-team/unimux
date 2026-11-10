@@ -30,6 +30,9 @@
 !define /ifndef ERROR_MORE_DATA 234
 
 Var UnimuxElectronDir
+; An Electron 1.1.x install for all users (HKLM) and whether it had a desktop shortcut for all users.
+Var UnimuxMachineDir
+Var UnimuxMachineDesktop
 
 ; Waits (up to 60 x 500 ms) until no process runs `exePath`, using the same Restart Manager query as the template's
 ; CheckIfAppIsRunning (every Electron process of 1.1.x, renderers and GPU included, runs from unimux.exe).
@@ -139,8 +142,55 @@ Var UnimuxElectronDir
     ${EndIf}
   ${EndIf}
 
+  ; 1b. An Electron 1.1.x install for all users ("Anyone who uses this computer": HKLM, often a folder only administrators
+  ;     may write). This per-user installer cannot take its folder over, so 1.2.x stays in its own; the old app is waited for
+  ;     and removed by its own uninstaller below (elevated: an administrator prompt, as its own updates had), and
+  ;     POSTINSTALL points the shortcuts at the new exe.
+  StrCpy $UnimuxMachineDir ""
+  StrCpy $UnimuxMachineDesktop 0
+  ${If} $UnimuxElectronDir == ""
+    SetRegView 64
+    ReadRegStr $R0 HKLM "${UNIMUX_ELECTRON_KEY}" "InstallLocation"
+    SetRegView lastused
+    ClearErrors
+    ${If} $R0 != ""
+      StrCpy $R1 $R0 1
+      ${If} $R1 == '"'
+        StrCpy $R0 $R0 "" 1
+        StrCpy $R0 $R0 -1
+      ${EndIf}
+      ${If} $R0 != $INSTDIR
+      ${AndIf} ${FileExists} "$R0\${UNIMUX_ELECTRON_UNINSTALLER}"
+        StrCpy $UnimuxMachineDir $R0
+        SetShellVarContext all
+        ${If} ${FileExists} "$DESKTOP\${PRODUCTNAME}.lnk"
+          StrCpy $UnimuxMachineDesktop 1
+        ${EndIf}
+        SetShellVarContext current
+      ${EndIf}
+    ${EndIf}
+  ${EndIf}
+
   ; 2. The running app (Electron 1.1.x, or an older 1.2.x) gets 30 s to wind down and save before the Restart Manager check.
+  ${If} $UnimuxMachineDir != ""
+    !insertmacro UNIMUX_WAIT_FOR_EXIT "$UnimuxMachineDir\${MAINBINARYNAME}.exe"
+  ${EndIf}
   !insertmacro UNIMUX_WAIT_FOR_EXIT "$INSTDIR\${MAINBINARYNAME}.exe"
+
+  ; 3b. The all-users uninstaller, elevated, from a copy. Not `--updated`: it removes the all-users shortcuts it made. A
+  ;     declined prompt leaves the old app installed; 1.2.x works anyway and the user can remove 1.1.x in Apps & features.
+  ${If} $UnimuxMachineDir != ""
+    SetOutPath $TEMP
+    InitPluginsDir
+    ClearErrors
+    CopyFiles /SILENT "$UnimuxMachineDir\${UNIMUX_ELECTRON_UNINSTALLER}" "$PLUGINSDIR\old-machine-uninstaller.exe"
+    ${IfNot} ${Errors}
+      ExecShellWait "runas" "$PLUGINSDIR\old-machine-uninstaller.exe" '/S /allusers /KEEP_APP_DATA _?=$UnimuxMachineDir' SW_HIDE
+      Delete "$PLUGINSDIR\old-machine-uninstaller.exe"
+    ${EndIf}
+    ClearErrors
+    SetOutPath $INSTDIR
+  ${EndIf}
 
   ; 3. The Electron uninstaller, from a copy (it removes its own file), keeping the data and the shortcuts. The working
   ;    directory is outside the install dir so the uninstaller can empty it.
@@ -199,6 +249,19 @@ Var UnimuxElectronDir
     ${EndIf}
   ${EndIf}
   ClearErrors
+
+  ; 1b. After an all-users 1.1.x: the user's Start menu entry, a desktop shortcut where the old app had one, and a taskbar
+  ;     pin all start the new exe (the old ones pointed into the folder its uninstaller just emptied).
+  ${If} $UnimuxMachineDir != ""
+    CreateShortcut "$SMPROGRAMS\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
+    ${If} $UnimuxMachineDesktop = 1
+    ${OrIf} ${FileExists} "$DESKTOP\${PRODUCTNAME}.lnk"
+      CreateShortcut "$DESKTOP\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
+    ${EndIf}
+    ${If} ${FileExists} "${UNIMUX_TASKBAR_PIN}"
+      CreateShortcut "${UNIMUX_TASKBAR_PIN}" "$INSTDIR\${MAINBINARYNAME}.exe"
+    ${EndIf}
+  ${EndIf}
 
   ; 2. Existing shortcuts (an update keeps them; 0.8.4 and older stamped com.ajzakomator.app) get the current AUMID, so the
   ;    taskbar groups the window with its pin and notifications keep working.

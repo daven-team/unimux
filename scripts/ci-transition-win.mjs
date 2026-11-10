@@ -32,7 +32,7 @@ function install(exe, args) {
 }
 
 const uninstallEntries = () => {
-  const text = ps(`@(Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*' -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like 'unimux*' } | ForEach-Object { $_.DisplayName + ' | ' + $_.DisplayVersion }) -join [char]10`);
+  const text = ps(`@(Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*','HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*' -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like 'unimux*' } | ForEach-Object { $_.DisplayName + ' | ' + $_.DisplayVersion }) -join [char]10`);
   return text ? text.split('\n') : [];
 };
 const running = (exe) => ps(`@(Get-CimInstance Win32_Process -Filter "Name='unimux.exe'" | Where-Object { $_.ExecutablePath -eq '${exe}' }).Count`);
@@ -46,7 +46,9 @@ async function waitFor(what, test, ms = 60000) {
   throw new Error(`timeout: ${what}`);
 }
 
-async function round(name, dir, oldArgs) {
+// `dir` is where 1.1.4 is installed, `newDir` where 1.2.x has to end up: the same folder for a per-user 1.1.4, the per-user
+// default for one installed for all users (this per-user installer removes that one with its own uninstaller).
+async function round(name, dir, oldArgs, newDir = dir) {
   console.log(`\n=== ${name}: ${dir}`);
   rmSync(dataDir, { recursive: true, force: true });
   install(oldSetup, ['/S', ...oldArgs]);
@@ -63,11 +65,19 @@ async function round(name, dir, oldArgs) {
 
   install(newSetup, ['--updated', '/S', '--force-run']);
 
-  assert.ok(existsSync(exe), 'unimux.exe is in the same folder');
-  const version = ps(`(Get-Item '${exe}').VersionInfo.ProductVersion`);
+  if (newDir !== dir) {
+    assert.ok(!existsSync(exe), 'the all-users 1.1.4 is uninstalled');
+    assert.ok(!existsSync(join(dir, 'Uninstall unimux.exe')), 'its uninstaller is gone too');
+    const startMenu = join(process.env.APPDATA, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'unimux.lnk');
+    const target = ps(`(New-Object -ComObject WScript.Shell).CreateShortcut('${startMenu}').TargetPath`);
+    assert.equal(target.toLowerCase(), join(newDir, 'unimux.exe').toLowerCase(), 'the Start menu entry starts the new exe');
+  }
+  const newExe = join(newDir, 'unimux.exe');
+  assert.ok(existsSync(newExe), `unimux.exe is in ${newDir}`);
+  const version = ps(`(Get-Item '${newExe}').VersionInfo.ProductVersion`);
   assert.ok(version.startsWith('1.2.0'), `installed version: ${version}`);
   for (const gone of [join('resources', 'app.asar'), 'ffmpeg.dll', 'chrome_100_percent.pak', 'icudtl.dat']) {
-    assert.ok(!existsSync(join(dir, gone)), `the Electron runtime is gone: ${gone}`);
+    assert.ok(!existsSync(join(dir, gone)) && !existsSync(join(newDir, gone)), `the Electron runtime is gone: ${gone}`);
   }
   const entries = uninstallEntries();
   console.log('apps & features after:', entries);
@@ -77,19 +87,19 @@ async function round(name, dir, oldArgs) {
   await waitFor('the marker for the update window', () => existsSync(join(dataDir, 'update', 'installer-done')));
 
   // --force-run starts the new app: it has to be there, and stay there.
-  await waitFor('the app started by --force-run', () => Number(running(exe)) > 0);
+  await waitFor('the app started by --force-run', () => Number(running(newExe)) > 0);
   await sleep(15000);
-  assert.ok(Number(running(exe)) > 0, 'the app still runs 15 s after the start');
+  assert.ok(Number(running(newExe)) > 0, 'the app still runs 15 s after the start');
   // crash.log is the app's rolling log: info and warn lines are normal on a first start (`<ISO> <level> <text>`).
   const crashLog = join(dataDir, 'crash.log');
   const errors = existsSync(crashLog) ? readFileSync(crashLog, 'utf8').split('\n').filter((l) => /^\S+ (error|fatal) /.test(l)) : [];
   assert.deepEqual(errors, [], 'no error in crash.log');
   console.log('started and still running');
 
-  ps(`Get-CimInstance Win32_Process -Filter "Name='unimux.exe'" | Where-Object { $_.ExecutablePath -eq '${exe}' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`);
-  await waitFor('the app stopped', () => Number(running(exe)) === 0);
+  ps(`Get-CimInstance Win32_Process -Filter "Name='unimux.exe'" | Where-Object { $_.ExecutablePath -eq '${newExe}' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`);
+  await waitFor('the app stopped', () => Number(running(newExe)) === 0);
   await sleep(2000);
-  install(join(dir, 'uninstall.exe'), ['/S']);
+  install(join(newDir, 'uninstall.exe'), ['/S']);
   await waitFor('uninstalled', () => uninstallEntries().length === 0, 120000);
   // Tauri's silent uninstaller keeps its install-location key. The next round is a machine that never had 1.2.0.
   ps(`Remove-Item -LiteralPath 'HKCU:\\Software\\ajzak, azozowsky' -Recurse -Force -ErrorAction SilentlyContinue`);
@@ -97,4 +107,7 @@ async function round(name, dir, oldArgs) {
 
 await round('default folder', join(local, 'Programs', 'unimux'), []);
 await round('own folder', 'C:\\Custom Apps\\unimux', ['/D=C:\\Custom Apps\\unimux']);
-console.log('\nUpdate 1.1.4 -> 1.2.0: both rounds passed');
+// "Anyone who uses this computer" in the 1.1.x installer: HKLM, Program Files or a folder of the user's own.
+await round('all users, default folder', join(process.env.ProgramFiles, 'unimux'), ['/allusers'], join(local, 'unimux'));
+await round('all users, own folder', 'C:\\Machine Apps\\unimux', ['/allusers', '/D=C:\\Machine Apps\\unimux'], join(local, 'unimux'));
+console.log('\nUpdate 1.1.4 -> 1.2.x: all four rounds passed');

@@ -357,7 +357,10 @@ fn kill_and_restart(with_outgoing_record: bool, stop_at: Option<usize>, after: O
             if start.elapsed() >= t {
                 break None;
             }
-        } else if let Ok(to) = fs::read_to_string(p.root.join("stopped")) {
+        } else if let Ok(to) = fs::read_to_string(p.root.join("stopped"))
+            // The file exists a moment before its text does.
+            && !to.is_empty()
+        {
             break Some(to);
         }
         if p.root.join("finished").exists() || child.try_wait().unwrap().is_some() {
