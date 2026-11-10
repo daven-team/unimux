@@ -57,3 +57,16 @@ describe('frame budgets of terminal work', () => {
     expect(app).toMatch(/className="app-width-scope" style=\{sidebarWidthVar\}/);
   });
 });
+
+describe('the tab strip measures its overflow off the status hot path', () => {
+  const titleBar = readFileSync('src/renderer/src/components/TitleBar.tsx', 'utf8');
+  it('a status count change forces no layout: the measure after a commit does not follow countsOf, a resized tab is reported by a ResizeObserver', () => {
+    const deps = titleBar.match(/useLayoutEffect\(measure, \[([^\]]*)\]\)/);
+    expect(deps).not.toBeNull();
+    expect(deps![1]).not.toContain('countsOf');
+    for (const dep of ['projects', 'documents', 'shown', 'settingsTabOpen', 'editing']) expect(deps![1]).toContain(dep);
+    // Every tab is observed; the report is applied before the paint, like the layout effect did.
+    expect(titleBar).toMatch(/new ResizeObserver\(\(\) => flushSync\(measure\)\)/);
+    expect(titleBar).toMatch(/for \(const tab of el\.children\) if \(!seen\.has\(tab\)\) \{ observer\.observe\(tab\); seen\.add\(tab\); \}/);
+  });
+});

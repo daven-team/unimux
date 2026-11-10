@@ -1,6 +1,7 @@
 import { shortcutText, titleWithShortcut, useShortcutText } from '../shortcuts';
 import { useI18n } from '../i18n';
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent } from 'react';
+import { flushSync } from 'react-dom';
 import { activeWorkspaceKey, gridTabLabels, groupWorkspaceKeys, mergeWorkspaceOrder, migrateWorkspaceOrders, reorderWorkspace, sameOrder, scopeWorkspaceKeys, stripKeyOwner, stripKeys, syncTabsToOrder } from '../../../shared/workspaceOrder';
 import { readLegacyOrders } from '../workspaceStrip';
 import type { Project } from '../../../shared/types';
@@ -186,13 +187,30 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
     const next = scrollEdges(el.scrollLeft, el.clientWidth, el.scrollWidth);
     setEdges((prev) => prev.canLeft === next.canLeft && prev.canRight === next.canRight ? prev : next);
   };
-  // After the strip's content changed (tabs, names, badges, dirty marks); changes of its own size are the ResizeObserver's.
-  useLayoutEffect(measure, [projects, project?.id, countsOf, documents, editing, settingsTabOpen, shown, tr]); // eslint-disable-line react-hooks/exhaustive-deps
+  // After tabs came or went (or were renamed): read before the paint, as before. A tab that only got wider or narrower (status
+  // badges of an agent status change, a dirty mark, the rename field) is reported by the ResizeObserver below after the
+  // browser's own layout, instead of forcing a layout of the whole window in every commit of a status change.
+  useLayoutEffect(measure, [projects, project?.id, documents, editing, settingsTabOpen, shown, tr]); // eslint-disable-line react-hooks/exhaustive-deps
+  const tabObserver = useRef<ResizeObserver | null>(null);
+  const observedTabs = useRef(new Set<Element>());
+  // Every tab of the strip is observed (new ones after each commit; observing reads no layout).
+  useLayoutEffect(() => {
+    const el = stripRef.current;
+    const observer = tabObserver.current;
+    if (!el || !observer) return;
+    const seen = observedTabs.current;
+    for (const tab of seen) if (tab.parentElement !== el) { observer.unobserve(tab); seen.delete(tab); }
+    for (const tab of el.children) if (!seen.has(tab)) { observer.observe(tab); seen.add(tab); }
+  });
   useEffect(() => {
     const el = stripRef.current;
     if (!el) return;
     const observer = new ResizeObserver(measure);
     observer.observe(el);
+    // Called in the frame's own layout step, before the paint: the scroll arrows change in the same frame as the tabs did.
+    const tabs = new ResizeObserver(() => flushSync(measure));
+    tabObserver.current = tabs;
+    for (const tab of el.children) { tabs.observe(tab); observedTabs.current.add(tab); }
     const wheel = (e: WheelEvent) => {
       if (e.ctrlKey || el.scrollWidth <= el.clientWidth) return;
       const delta = wheelScroll(e, el.clientWidth);
@@ -201,7 +219,7 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
       el.scrollLeft += delta;
     };
     el.addEventListener('wheel', wheel, { passive: false });
-    return () => { observer.disconnect(); el.removeEventListener('wheel', wheel); };
+    return () => { observer.disconnect(); tabs.disconnect(); tabObserver.current = null; observedTabs.current.clear(); el.removeEventListener('wheel', wheel); };
   }, []);
   const activeKey = activeWorkspaceKey({ settingsActive, sshActive, fileId: activeFileId, gridId: project?.activeTabId ?? null });
   useEffect(() => {
