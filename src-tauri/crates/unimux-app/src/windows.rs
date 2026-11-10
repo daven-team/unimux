@@ -313,6 +313,7 @@ pub(crate) fn watch_window_state(window: &WebviewWindow, ctx: Arc<AppContext>) {
         if shown.swap(now_shown, Ordering::SeqCst) != now_shown {
             ctx.events.emit(Scope::Window(w.label().to_string()), "window:shown", vec![Value::Bool(now_shown)]);
             crate::commands::pty::engine().set_window_hidden(w.label(), !now_shown);
+            set_memory_target(&w, !now_shown);
             if now_shown && w.label() == MAIN {
                 reapply_taskbar(&ctx);
             }
@@ -327,6 +328,34 @@ pub(crate) fn watch_window_state(window: &WebviewWindow, ctx: Arc<AppContext>) {
         }
     });
 }
+
+/// A minimized or hidden window asks WebView2 to keep its memory low (ICoreWebView2_19 MemoryUsageTargetLevel): scripts and
+/// timers keep running, unlike SetIsVisible(false) or TrySuspend, so output still flows into the terminals; WebView2 may
+/// trim or page out memory it can rebuild. Shown again, the level goes back to normal. Check builds can turn it off for an
+/// A/B with MC_NO_MEMORY_TARGET=1.
+#[cfg(windows)]
+fn set_memory_target(window: &WebviewWindow, low: bool) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL, ICoreWebView2_19,
+    };
+    use windows::core::Interface;
+    if cfg!(dev_overrides) && std::env::var_os("MC_NO_MEMORY_TARGET").is_some() {
+        return;
+    }
+    let level = if low { COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW } else { COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL };
+    let _ = window.with_webview(move |webview| {
+        // SAFETY: COM calls on the live controller, on the thread Tauri runs this closure on. An older runtime without
+        // ICoreWebView2_19 just keeps its default level.
+        unsafe {
+            if let Ok(core) = webview.controller().CoreWebView2().and_then(|c| c.cast::<ICoreWebView2_19>()) {
+                let _ = core.SetMemoryUsageTargetLevel(level);
+            }
+        }
+    });
+}
+
+#[cfg(not(windows))]
+fn set_memory_target(_window: &WebviewWindow, _low: bool) {}
 
 /// WebView2 settings of 1.1.4's BrowserWindow: no default context menu, no browser accelerators (Ctrl+R/F5/P/F reach the
 /// app), no zoom (Ctrl+wheel), non-client regions for the W1 caption buttons.
