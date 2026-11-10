@@ -44,6 +44,8 @@ const TRICKLE_ACK_MS = 100;
 const TRICKLE_ACK_BYTES = 64 * 1024;
 /** Window size changes closer together than this are a drag of the window edge (see the constructor). */
 const WINDOW_DRAG_MS = 150;
+/** The focused terminal's cursor stops blinking after this long without a key, a paste or output (every blink is a redraw). */
+const CURSOR_IDLE_MS = 30_000;
 
 /** Loses a GL context now, so Chromium stops counting it before the garbage collector would. */
 function loseGl(gl: WebGL2RenderingContext | null): void {
@@ -216,9 +218,11 @@ class TerminalManager {
     window.addEventListener('blur', environment);
     onWindowShown((shown) => { this.setWindowShown(shown); environment(); });
     // A shown terminal on the DOM renderer (the pool was short, or its context was lost) asks again once a second; the
-    // plan itself limits how often a context moves between cells on screen.
+    // plan itself limits how often a context moves between cells on screen. Without terminals there is nothing to release,
+    // balance or prewarm; the tick stays, as the limit recovers one step per tick (WebglLimit.recover).
     setInterval(() => {
       if (this.webglLimit.recover(performance.now())) console.warn(`WebGL contexts limit raised to ${this.webglLimit.limit}`);
+      if (!this.entries.size) return;
       this.releaseStale();
       if (this.needsWebgl()) this.balanceWebgl();
       else if (this.windowShown && this.prewarmPick(performance.now())) this.schedulePrewarm();
@@ -267,7 +271,8 @@ class TerminalManager {
     }
     for (const e of this.entries.values()) {
       e.host.style.display = '';
-      if (e.attachedTo) this.refit(e);
+      if (!e.attachedTo) continue; // a parked one resumes when attached
+      this.refit(e);
       e.unsyncViewport?.resume();
     }
     this.balanceWebgl();
@@ -517,9 +522,13 @@ class TerminalManager {
       id: cellId, term, fit, webgl: null, shownAt: 0, createdAt: performance.now(), outputAt: undefined, webglChangedAt: undefined, webglBlockedUntil: undefined, webglGl: null, webglGrantedAt: -Infinity, webglLosses: 0, host, tracker: new StatusTracker(), win32: false, agent: opts.agent,
       codex: opts.codex === true, scanner: new FailureScanner(), guard: new MouseFloodGuard(), infer: new AgentInference(window.mc.platform === 'win32' && opts.remote !== true), attachedTo: null, resizeObs: null, replaying: 0, replayMarks: null, refitAfterReplay: false, ptyLive: false, lastSize: { cols: term.cols, rows: term.rows },
       parkedSelection: null, applySelection: null, remote: opts.remote === true, addon: null, askEpoch: 0,
-      unsyncViewport: coalesceViewportSync(term, host, undefined, () => !this.windowShown),
+      // No scrollbar syncs (and no frames for them) while nobody sees it: a minimized window or a terminal parked off any cell
+      // (`entry` is read at sync time, after it is built). attach() and setWindowShown resume it.
+      unsyncViewport: coalesceViewportSync(term, host, undefined, () => !this.windowShown || entry.attachedTo === null),
       start: new StartWatch(), startTimer: null,
     };
+    const wake = () => this.wakeCursor(entry);
+    for (const type of ['keydown', 'paste', 'focusin'] as const) host.addEventListener(type, wake, { capture: true, passive: true });
     entry.tracker.setCodex(entry.codex);
     entry.tracker.setAgent(entry.agent);
     entry.tracker.onBind = (thread) => this.bindListeners.forEach((l) => l(cellId, thread));
@@ -771,6 +780,9 @@ class TerminalManager {
       this.fitsQueued = true;
       queueMicrotask(() => this.flushFits());
     }
+    // The scrollbar syncs skipped while parked: queued for the next frame, so they run after the fit above (a microtask).
+    // A hidden window resumes them when it shows (setWindowShown).
+    if (this.windowShown) e.unsyncViewport?.resume();
     if (this.focusOnAttach === cellId) { this.focusOnAttach = null; e.term.focus(); }
   }
 
@@ -923,6 +935,33 @@ class TerminalManager {
     if (victim?.webgl && !victim.attachedTo) { this.releaseWebgl(victim); victim.webglChangedAt = now; }
     this.createWebgl(e, now);
     return e.webgl !== null;
+  }
+
+  /** The last key press, paste or focus in a terminal (see wakeCursor). */
+  private cursorWokeAt = -Infinity;
+  private cursorTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * A focused terminal's blinking cursor redraws it about 1.7 times a second for as long as it sits there: after
+   * CURSOR_IDLE_MS without a key, a paste or output it stops blinking (the cursor stays drawn) and blinks again at the next
+   * key, paste or focus. One timer for the whole window; output only counts through `outputAt`, it arms nothing.
+   */
+  private wakeCursor(e: Entry): void {
+    this.cursorWokeAt = performance.now();
+    if (!e.term.options.cursorBlink) e.term.options.cursorBlink = true;
+    this.cursorTimer ??= setTimeout(() => this.idleCursor(), CURSOR_IDLE_MS);
+  }
+
+  private idleCursor(): void {
+    this.cursorTimer = null;
+    const active = document.activeElement;
+    let e: Entry | undefined;
+    for (const x of this.entries.values()) if (x.term.textarea === active) { e = x; break; }
+    // An unfocused terminal does not blink; it wakes up again when it gets the focus.
+    if (!e || !e.term.options.cursorBlink) return;
+    const idle = performance.now() - Math.max(this.cursorWokeAt, e.outputAt ?? -Infinity);
+    if (idle < CURSOR_IDLE_MS) { this.cursorTimer = setTimeout(() => this.idleCursor(), CURSOR_IDLE_MS - idle); return; }
+    e.term.options.cursorBlink = false;
   }
 
   private prewarmHandle = 0;

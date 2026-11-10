@@ -9,6 +9,7 @@ import {
   type PromptQueue, type QueuePause, type QueueVerdict,
 } from '../../shared/promptQueue';
 import type { AppState, Cell } from '../../shared/types';
+import { ActiveInterval } from '../../shared/activeInterval';
 import { isStarted } from './actions';
 import { tr } from './i18n';
 import { getS, getUi, toast, update, useStore } from './store';
@@ -207,5 +208,9 @@ export function initPromptQueue(): void {
   });
   queued = collect(getS());
   // Typing into the terminal after a turn end pauses a queue that is counting down (the prompt line holds the user's text).
-  setInterval(() => { for (const id of Object.keys(useQueueRuntime.getState().countdown)) evaluate(id); }, 250);
+  // Looked at every 250 ms while a countdown runs, no timer otherwise.
+  const watch = new ActiveInterval(() => { for (const id of Object.keys(useQueueRuntime.getState().countdown)) evaluate(id); }, 250);
+  const syncWatch = (countdown: Record<string, number>) => watch.set(Object.keys(countdown).length > 0);
+  useQueueRuntime.subscribe((r, prev) => { if (r.countdown !== prev.countdown) syncWatch(r.countdown); });
+  syncWatch(useQueueRuntime.getState().countdown);
 }

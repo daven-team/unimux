@@ -62,7 +62,7 @@ export const WAIT_MAX_SECONDS = 45;
  * Longest bounded wait per CLI of the caller (1.1.4). Codex cells get tool_timeout_sec=180 (shared/profiles.ts), so 170 s
  * stays below it. Claude Code's tool timeout is long by default (MCP_TOOL_TIMEOUT, about 28 h), its per-request first-byte
  * timer is raised by the per-cell config's `timeout` (mcpCellConfig.ts) and its 5 minute idle timer is reset by the progress
- * notifications wait_for sends every 10 s; 600 s was checked with scripts/verify-mcp-cli.mjs.
+ * notifications wait_for sends every 60 s; 600 s was checked with scripts/verify-mcp-cli.mjs.
  */
 export const WAIT_MAX_BY_CLI: Readonly<Record<string, number>> = { codex: 170, claude: 600 };
 export const WAIT_SCHEMA_MAX = 600;

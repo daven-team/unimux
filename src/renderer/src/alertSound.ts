@@ -6,12 +6,46 @@ import { getPreset, type SoundPreset } from '../../shared/soundPresets';
 import { getS } from './store';
 
 let context: AudioContext | null = null;
+/** Decoded own files: an AudioBuffer is not bound to the context that decoded it, so it outlives a closed one. */
 const cached = new Map<AlertEventId, { key: string; buffer: AudioBuffer }>();
 
+/**
+ * An open AudioContext keeps the engine's audio service running (a process of its own in WebView2) for as long as the app
+ * runs: it is closed CLOSE_AFTER_MS after the last sound ended and a new one is made for the next alert.
+ */
+const CLOSE_AFTER_MS = 10_000;
+let closeAt = 0;
+let closeTimer: ReturnType<typeof setTimeout> | null = null;
+/** Sounds waiting for their context to resume (WebKit holds one 'suspended' until the next user gesture, webkitCompat.ts). */
+let resuming = 0;
+
+/** Keeps the context open for `ms` (a sound that plays) and CLOSE_AFTER_MS after it; overlapping sounds keep the latest end. */
+function keepOpen(ms: number): void {
+  closeAt = Math.max(closeAt, performance.now() + ms + CLOSE_AFTER_MS);
+  closeTimer ??= setTimeout(closeIdle, Math.max(0, closeAt - performance.now()));
+}
+
+function closeIdle(): void {
+  closeTimer = null;
+  if (resuming > 0) closeAt = Math.max(closeAt, performance.now() + CLOSE_AFTER_MS);
+  if (performance.now() < closeAt) {
+    closeTimer = setTimeout(closeIdle, closeAt - performance.now());
+    return;
+  }
+  const ctx = context;
+  context = null;
+  void ctx?.close().catch(() => { /* already closed */ });
+}
+
 async function audio(): Promise<AudioContext> {
+  keepOpen(0);
   context ??= new AudioContext();
-  if (context.state === 'suspended') await context.resume();
-  return context;
+  const ctx = context;
+  if (ctx.state === 'suspended') {
+    resuming++;
+    try { await ctx.resume(); } finally { resuming--; keepOpen(0); }
+  }
+  return ctx;
 }
 
 async function fileBuffer(event: AlertEventId): Promise<AudioBuffer | null> {
@@ -25,11 +59,13 @@ async function fileBuffer(event: AlertEventId): Promise<AudioBuffer | null> {
   return buffer;
 }
 
-function playPreset(ctx: AudioContext, preset: SoundPreset, volume: number): void {
+/** Plays a preset; returns how long it sounds (ms). */
+function playPreset(ctx: AudioContext, preset: SoundPreset, volume: number): number {
   const master = ctx.createGain();
   master.gain.value = volume;
   master.connect(ctx.destination);
   const t0 = ctx.currentTime + 0.02;
+  let last = t0;
   for (const note of preset.notes) {
     const start = t0 + note.start;
     const end = start + note.duration;
@@ -43,7 +79,9 @@ function playPreset(ctx: AudioContext, preset: SoundPreset, volume: number): voi
     osc.connect(env).connect(master);
     osc.start(start);
     osc.stop(end + 0.05);
+    last = Math.max(last, end + 0.05);
   }
+  return (last - ctx.currentTime) * 1000;
 }
 
 /**
@@ -60,7 +98,7 @@ export async function playAlertSound(event: AlertEventId, choice: SoundChoice, v
     const preset = getPreset(choice.id);
     if (!preset) return true;
     try {
-      playPreset(await audio(), preset, volume);
+      keepOpen(playPreset(await audio(), preset, volume));
       return true;
     } catch {
       window.mc.systemBeep();
@@ -77,6 +115,7 @@ export async function playAlertSound(event: AlertEventId, choice: SoundChoice, v
       source.buffer = buffer;
       source.connect(gain).connect(ctx.destination);
       source.start();
+      keepOpen(buffer.duration * 1000);
       return true;
     }
   } catch { /* undecodable file: fall back below */ }

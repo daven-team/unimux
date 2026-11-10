@@ -41,8 +41,8 @@ function viewportOf(term: unknown): ViewportLike | null {
 /**
  * Folds the per-line scrollbar syncs of `term` (an opened xterm Terminal) into one per frame. `host` gets capture listeners that
  * flush a pending sync before xterm handles a wheel turn or a click. While `hidden()` (a window nobody sees, R2: WebView2 keeps
- * running animation frames for a minimized window, so every printed line asked for two frames) no sync is scheduled at all;
- * `resume()` of the result runs one when the terminal shows again. Returns the function that undoes it all (call it before
+ * running animation frames for a minimized window, so every printed line asked for two frames; or a terminal parked off any
+ * cell) no sync is scheduled at all; `resume()` of the result runs one when the terminal shows again. Returns the function that undoes it all (call it before
  * the terminal is disposed), or null when this xterm has no such viewport.
  */
 export function coalesceViewportSync(term: unknown, host: EventTarget, frames: FrameScheduler = animationFrames, hidden: () => boolean = () => false): ViewportUnsync | null {
@@ -54,7 +54,9 @@ export function coalesceViewportSync(term: unknown, host: EventTarget, frames: F
   const queueSync = typeof vp.queueSync === 'function' ? vp.queueSync : null;
   let frame = 0;
   let disposed = false;
+  /** A line-by-line sync (it reads the buffer's ydisp) and xterm's queued sync (it reads the latest ydisp) skipped while hidden. */
   let skipped = false;
+  let skippedQueued = false;
   const flush = () => {
     if (!frame) return;
     frames.cancel(frame);
@@ -75,14 +77,20 @@ export function coalesceViewportSync(term: unknown, host: EventTarget, frames: F
     vp.queueSync = function (ydisp?: number) {
       if (!disposed && hidden()) {
         if (ydisp !== undefined) vp._latestYDisp = ydisp;
-        skipped = true;
+        skippedQueued = true;
         return;
       }
       return queueSync.call(vp, ydisp);
     };
   }
-  vp.scrollLines = function (...args: unknown[]) { flush(); return scrollLines.apply(vp, args); };
-  vp.scrollToLine = function (...args: unknown[]) { flush(); return scrollToLine.apply(vp, args); };
+  // A hidden terminal scrolled by code (scrollToBottom of a parked one) gets its scrollbar's size first, or the new position
+  // is clamped to a stale height and the sync on resume (same ydisp) does not move it. The resume still runs when it shows.
+  const catchUp = () => {
+    flush();
+    if ((skipped || skippedQueued) && !disposed) sync.call(vp);
+  };
+  vp.scrollLines = function (...args: unknown[]) { catchUp(); return scrollLines.apply(vp, args); };
+  vp.scrollToLine = function (...args: unknown[]) { catchUp(); return scrollToLine.apply(vp, args); };
   for (const type of VIEWPORT_INPUT_EVENTS) host.addEventListener(type, flush, { capture: true, passive: true });
   const undo = () => {
     if (disposed) return;
@@ -96,11 +104,16 @@ export function coalesceViewportSync(term: unknown, host: EventTarget, frames: F
     if (queueSync) vp.queueSync = queueSync;
   };
   const resume = () => {
-    if (!skipped || disposed) return;
+    if ((!skipped && !skippedQueued) || disposed) return;
+    const queued = skippedQueued && queueSync !== null;
+    const lines = skipped || !queued;
     skipped = false;
-    // xterm's queued sync (it reads the latest ydisp); without one, the folded sync of the next frame.
-    if (queueSync) queueSync.call(vp);
-    else vp._sync();
+    skippedQueued = false;
+    // xterm's queued sync (a resize, a buffer switch: it reads the latest ydisp), then the folded sync of the next frame
+    // for skipped scrolls (it reads the buffer's ydisp, so a parked terminal that printed shows its scrollbar where it is).
+    // Both run in the next frame, after the fit of a terminal just attached (a microtask).
+    if (queued) queueSync!.call(vp);
+    if (lines) vp._sync();
   };
   return Object.assign(undo, { resume });
 }

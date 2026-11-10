@@ -7,6 +7,7 @@ import { useI18n } from '../i18n';
 import { swapErrorKey, swapErrorText } from '../../../shared/swapMessages';
 import { askChoice, setUi, toast, update, useStore } from '../store';
 import { useUsage } from '../usage';
+import { useWaitClock } from '../waiting';
 import { openMenuAt } from './ContextMenu';
 import { IChevron, IPlus } from './icons';
 import { ProviderIcon } from './ProviderIcons';
@@ -314,7 +315,8 @@ export function UsagePanel() {
   // 1.1.2: the Switcher card, anchored to the row (or the header switch) it was opened from.
   const [switcherAnchor, setSwitcherAnchor] = useState<HTMLElement | null>(null);
   const closeSwitcher = useCallback(() => setSwitcherAnchor(null), []);
-  const [now, setNow] = useState(() => Date.now());
+  // "Now" for the reset times: refreshed every 30 s while the panel is on and the window is shown.
+  const now = useWaitClock(settings.showAiUsage);
   const [refreshing, setRefreshing] = useState(false);
   const spinning = useHoldBusy(refreshing, 700);
   const [swapping, setSwapping] = useState<string | null>(null);
@@ -325,10 +327,6 @@ export function UsagePanel() {
   useEffect(() => {
     void window.mc.swapPending().then((pending) => { if (alive.current) setSwapPending(pending); }).catch(() => undefined);
     return window.mc.on('accounts:swapPending', (pending) => { if (alive.current) setSwapPending(pending); });
-  }, []);
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(timer);
   }, []);
   if (!settings.showAiUsage) return null;
 

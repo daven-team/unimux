@@ -116,3 +116,68 @@ describe('coalesceViewportSync while hidden (R2)', () => {
     expect(Object.prototype.hasOwnProperty.call(vp, 'queueSync') && vp.queueSync.name).toBe('queueSync');
   });
 });
+
+describe('coalesceViewportSync for a parked terminal', () => {
+  function parked() {
+    const calls: unknown[][] = [];
+    const vp = {
+      _latestYDisp: undefined as number | undefined,
+      _sync(...args: unknown[]) { calls.push(['sync', ...args]); },
+      queueSync(ydisp?: number) { calls.push(['queueSync', ydisp]); },
+      scrollLines(...args: unknown[]) { calls.push(['scrollLines', ...args]); },
+      scrollToLine(...args: unknown[]) { calls.push(['scrollToLine', ...args]); },
+    };
+    const queued = new Map<number, () => void>();
+    let next = 0;
+    const frames: FrameScheduler = { request: (cb) => { queued.set(++next, cb); return next; }, cancel: (id) => { queued.delete(id); } };
+    const runFrame = () => { const cbs = [...queued.values()]; queued.clear(); cbs.forEach((cb) => cb()); };
+    const state = { hidden: true };
+    const undo = coalesceViewportSync({ _core: { _viewport: vp } }, new EventTarget(), frames, () => state.hidden)!;
+    return { vp, calls, queued, runFrame, state, undo };
+  }
+
+  it('asks for no frame while it prints and syncs once in the frame after it is shown', () => {
+    const { vp, calls, queued, runFrame, state, undo } = parked();
+    for (let i = 0; i < 30; i++) vp._sync();
+    expect(queued.size).toBe(0);
+    expect(calls).toEqual([]);
+    state.hidden = false;
+    undo.resume();
+    // Only line syncs were skipped: the folded sync (the buffer's ydisp), in the next frame.
+    expect(calls).toEqual([]);
+    expect(queued.size).toBe(1);
+    runFrame();
+    expect(calls).toEqual([['sync']]);
+    undo.resume();
+    expect(queued.size).toBe(0);
+  });
+
+  it('runs xterm queued sync and the line sync when both were skipped', () => {
+    const { vp, calls, queued, runFrame, state, undo } = parked();
+    vp._sync();
+    vp.queueSync();
+    state.hidden = false;
+    undo.resume();
+    expect(calls).toEqual([['queueSync', undefined]]);
+    runFrame();
+    expect(calls).toEqual([['queueSync', undefined], ['sync']]);
+    expect(queued.size).toBe(0);
+  });
+
+  it('sizes the scrollbar before a hidden terminal is scrolled by code', () => {
+    const { vp, calls, state, undo, queued, runFrame } = parked();
+    vp._sync();
+    vp.scrollToLine(80, true);
+    expect(calls).toEqual([['sync'], ['scrollToLine', 80, true]]);
+    // The resume still syncs once when it shows; after that a scroll syncs nothing extra.
+    calls.length = 0;
+    state.hidden = false;
+    undo.resume();
+    runFrame();
+    expect(calls).toEqual([['sync']]);
+    calls.length = 0;
+    vp.scrollLines(2);
+    expect(calls).toEqual([['scrollLines', 2]]);
+    expect(queued.size).toBe(0);
+  });
+});
