@@ -133,6 +133,16 @@ fn main() {
         crash.warn(&line);
     }
 
+    // Above normal priority (Windows): this process moves every key and every terminal byte between the ptys and the window,
+    // so a build using every core (in a cell or elsewhere) must not delay it. Children (shells, agents, the WebView2 browser)
+    // still start at normal priority: Windows passes only idle and below normal on. See lifecycle::webview::raise_priority.
+    #[cfg(windows)]
+    // SAFETY: the pseudo handle of this process needs no closing.
+    unsafe {
+        use ::windows::Win32::System::Threading::{ABOVE_NORMAL_PRIORITY_CLASS, GetCurrentProcess, SetPriorityClass};
+        let _ = SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS);
+    }
+
     // One instance per data dir, Electron 1.1.x included (it forwards to us; we forward to it).
     let second: Arc<parking_lot::Mutex<Option<Arc<AppContext>>>> = Arc::new(parking_lot::Mutex::new(None));
     let second_ctx = second.clone();

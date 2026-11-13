@@ -81,6 +81,11 @@ try {
   setPriority(wv, 'above');
   startLoad('normal'); await sleep(1500); await run('load-webview'); stopLoad();
   setPriority(wv, 'normal');
+  // The terminal's console host (OpenConsole.exe / conhost.exe, a child of the app) above normal too.
+  const consoles = ps(`Get-CimInstance Win32_Process -Filter "ParentProcessId=${app.pid}" | Where-Object { $_.Name -match 'OpenConsole|conhost' } | ForEach-Object { $_.ProcessId }`).split(/\s+/).filter(Boolean).map(Number);
+  setPriority(consoles, 'above');
+  startLoad('normal'); await sleep(1500); await run('load-console'); stopLoad();
+  out.consoles = consoles.length;
   out.cores = cpus().length;
   out.webviewProcesses = wv.length;
   console.log(JSON.stringify(out));

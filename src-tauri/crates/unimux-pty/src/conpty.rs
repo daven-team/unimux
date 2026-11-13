@@ -44,8 +44,8 @@ use windows::Win32::System::JobObjects::{AssignProcessToJobObject, CreateJobObje
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress, LOAD_WITH_ALTERED_SEARCH_PATH, LoadLibraryExW};
 use windows::Win32::System::Pipes::CreatePipe;
 use windows::Win32::System::Threading::{
-    BELOW_NORMAL_PRIORITY_CLASS, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, DeleteProcThreadAttributeList,
-    EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess, INFINITE, InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST,
+    CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT,
+    GetExitCodeProcess, INFINITE, InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST,
     PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, PROCESS_INFORMATION, ResumeThread, STARTF_USESTDHANDLES, STARTUPINFOEXW,
     TerminateProcess, UpdateProcThreadAttribute, WaitForSingleObject,
 };
@@ -838,9 +838,6 @@ unsafe fn start_process(opts: &SpawnOptions, hpc: isize, job: Option<&Job>) -> i
         });
         let cwd = opts.cwd.as_ref().map(|c| wide(c.as_os_str()));
         let mut flags = EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT;
-        if crate::low_priority() {
-            flags |= BELOW_NORMAL_PRIORITY_CLASS;
-        }
         if job.is_some() {
             flags |= CREATE_SUSPENDED;
         }

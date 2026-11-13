@@ -263,8 +263,6 @@ async fn spawn_unsafe(ctx: &Arc<AppContext>, req: &SpawnCell) -> Result<Value, S
     }
 
     let state = ctx.state.get();
-    // Terminal programs below the app unless the user turned it off (settings.terminalLowPriority, absent = on).
-    unimux_pty::set_low_priority(state.pointer("/settings/terminalLowPriority").and_then(Value::as_bool) != Some(false));
     let role_cell = if profile_cli != "shell" { find_cell(&state, cell) } else { None };
     let role: Option<String> = role_cell
         .filter(|c| !truthy(c.get("ssh")))
