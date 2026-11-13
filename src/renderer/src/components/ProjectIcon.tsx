@@ -1,7 +1,7 @@
 import type { Project } from '../../../shared/types';
 
 /** The editor and every project list use the same icon, including its color treatment. */
-export function ProjectIconView({ project, size = 'md' }: { project: Pick<Project, 'name' | 'color' | 'icon'>; size?: 'md' | 'xl' }) {
+export function ProjectIconView({ project, size = 'md' }: { project: Pick<Project, 'name' | 'color' | 'icon'>; size?: 'sm' | 'md' | 'xl' }) {
   const icon = project.icon;
   const cls = `picon ${size}`;
   if (icon?.kind === 'image') return <span className={cls}><img src={icon.dataUrl} alt="" draggable={false} /></span>;

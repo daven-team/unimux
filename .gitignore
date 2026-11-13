@@ -18,3 +18,4 @@ docs/superpowers/
 # Tauri (1.2.0)
 src-tauri/target/
 src-tauri/crates/unimux-app/gen/
+.superpowers/

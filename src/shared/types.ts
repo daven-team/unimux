@@ -125,6 +125,16 @@ export interface Project {
   activeTabId: string | null;
 }
 
+/** A named group of projects in the Projects panel (one level deep). */
+export interface ProjectFolder {
+  id: string;
+  name: string;
+  /** Folded in the panel (kept across restarts). */
+  collapsed: boolean;
+  /** Its projects in panel order. */
+  projectIds: string[];
+}
+
 export interface PresetCell {
   color?: string;
   profileId: string;
@@ -234,6 +244,10 @@ export interface AppState {
   version: 1;
   automation: AutomationState;
   projects: Project[];
+  /** Folders of the Projects panel (1.2.4, shared/projectFolders.ts); absent until the first folder. */
+  projectFolders?: ProjectFolder[];
+  /** The top-level order of the Projects panel: project and folder ids (1.2.4); absent until the first folder. */
+  sidebarOrder?: string[];
   activeProjectId: string | null;
   profiles: Profile[];
   presets: Preset[];
