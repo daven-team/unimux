@@ -31,6 +31,7 @@ import { webviewEngine } from '../platform';
 import { finalReplaySize, replaySegments, writeReplaySegments, type ReplaySize } from '../../../shared/replay';
 import { cursorOffset, reflowedCursor, type WrapBuffer } from '../../../shared/cursorReflow';
 import { coalesceViewportSync, type ViewportUnsync } from '../../../shared/viewportSync';
+import { snapCharWidth } from '../../../shared/cellWidth';
 import { AGENT_START_OSC, AGENT_START_PAYLOAD, showsLaunchLine, StartWatch, type StartScreen } from '../../../shared/startScreen';
 import { messageChannelPost, StagedQueue } from '../../../shared/stagedQueue';
 
@@ -517,6 +518,8 @@ class TerminalManager {
     // Measured and opened: from now on it waits out of the layout until a cell shows it.
     this.parking.appendChild(host);
     this.skipHiddenSelectionRedraws(term);
+    // Both renderers lay out WebGL's cell width: a context that comes or goes never changes the columns (shared/cellWidth.ts).
+    snapCharWidth(term);
 
     const entry: Entry = {
       id: cellId, term, fit, webgl: null, shownAt: 0, createdAt: performance.now(), outputAt: undefined, webglChangedAt: undefined, webglBlockedUntil: undefined, webglGl: null, webglGrantedAt: -Infinity, webglLosses: 0, host, tracker: new StatusTracker(), win32: false, agent: opts.agent,
@@ -1095,8 +1098,9 @@ class TerminalManager {
   /**
    * The WebGL renderer rounds the cell width to device pixels (7.61 px with the DOM renderer is 7 px with WebGL at 100 percent),
    * so a terminal fitted while the DOM renderer drew it (the first frames of a start, before its context came) kept the DOM
-   * renderer's narrower column count while its box stayed the same size: no ResizeObserver report, no new fit. Each renderer
-   * change fits the shown terminal again (only a changed size reaches the pty).
+   * renderer's narrower column count while its box stayed the same size: no ResizeObserver report, no new fit. Both renderers
+   * now lay out the same cell width (snapCharWidth in ensure), so this fit normally changes nothing; it stays as the safety net
+   * for an xterm without the internals snapCharWidth needs (only a changed size reaches the pty).
    */
   private refitForRenderer(e: Entry): void {
     if (!e.attachedTo || !this.windowShown) return;

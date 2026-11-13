@@ -226,6 +226,14 @@ html[data-platform="darwin"] .first-run-titlebar { padding-left: calc(84px / var
 .cli-banner .grow { flex: 1; min-width: 200px; }
 .term-host .xterm { height: 100%; }
 .term-host .xterm-viewport { background: var(--card-bg) !important; }
+/* xterm 6's scrollbar (VS Code's scrollable element) as in VS Code's terminal: a thin thumb at the right edge of the 14 px gutter
+   the fit keeps free (FitAddon reserves it), so it never covers text. xterm reveals it whenever the buffer scrolls, which in an
+   agent cell meant at every line of output: it shows only while the pointer is over the terminal (a wheel turn included) or
+   its thumb is dragged. Wheel scrolling, track clicks and thumb drags work as before. */
+.term-host .xterm-scrollable-element > .scrollbar.vertical > .slider { left: auto !important; right: 2px; width: 6px !important; border-radius: 3px; transition: width .12s ease-out; }
+.term-host .xterm-scrollable-element > .scrollbar.vertical:hover > .slider,
+.term-host .xterm-scrollable-element > .scrollbar.vertical > .slider.active { width: 10px !important; border-radius: 5px; }
+.term-host:not(:hover):not(:has(.slider.active)) .xterm-scrollable-element > .scrollbar.vertical { opacity: 0 !important; pointer-events: none; }
 .cell-error {
   position: absolute; left: 12px; right: 12px; bottom: 12px; padding: 10px 12px; border-radius: var(--radius);
   background: #2a1414; border: 1px solid #5b2626; color: #fecaca; display: flex; gap: 10px; align-items: stretch; z-index: 2;
