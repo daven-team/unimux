@@ -189,14 +189,14 @@ export function ProjectsPanel({ resize }: PanelProps) {
                 e.stopPropagation();
                 scrollDragList(e.currentTarget.closest('.side-list')!, e.clientY);
                 const row = e.currentTarget.querySelector<HTMLElement>('.project')!;
-                setOver({ id: p.id, zone: dropZone(row, e.clientY, !drag!.folder) });
+                setOver({ id: p.id, zone: dropZone(row, e.clientY, !drag!.folder && !folderId) });
               }}
               onDrop={(e) => {
                 if (!dragging(e)) return;
                 e.preventDefault();
                 e.stopPropagation();
                 const row = e.currentTarget.querySelector<HTMLElement>('.project')!;
-                if (dragId !== p.id) dropOn({ id: p.id, folderId, isFolder: false }, dropZone(row, e.clientY, !drag!.folder));
+                if (dragId !== p.id) dropOn({ id: p.id, folderId, isFolder: false }, dropZone(row, e.clientY, !drag!.folder && !folderId));
                 endDrag();
               }}
             >
@@ -328,12 +328,12 @@ export function ProjectsPanel({ resize }: PanelProps) {
       >
         {tree.map((item) => item.kind === 'project' ? renderProject(item.project, null) : renderFolder(item))}
       {projects.length > 0 && (
-        <div className="project-add-row">
+        <div className={`project-add-row ${over?.id === null ? 'drop-end' : ''}`}>
           <button className="btn project-add-inline" onClick={() => void createProject()} title={tr('Dodaj projekt')} aria-label={tr('Dodaj projekt')}><IPlus />{tr('Dodaj projekt')}</button>
           <button className="btn project-add-inline folder-add" onClick={newFolder} title={tr('Nowy folder')} aria-label={tr('Nowy folder')}><IFolder />{tr('Nowy folder')}</button>
         </div>
       )}
-      {projects.length > 0 && <div className={`project-drop-space ${over?.id === null ? 'drop-end' : ''}`} aria-hidden="true" />}
+      {projects.length > 0 && <div className="project-drop-space" aria-hidden="true" />}
       {!projects.length && (
         <PanelEmpty>
           <p>{tr("Nie masz jeszcze projektów.")} {tr("Projekt to folder, w którym będą pracować Twoi agenci.")}</p>

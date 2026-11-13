@@ -1224,3 +1224,6 @@ html[data-window-shown="false"] *, html[data-window-shown="false"] *::before, ht
 .project-add-row { display: flex; gap: 6px; }
 .project-add-row .project-add-inline { flex: 1; min-width: 0; }
 @media (prefers-reduced-motion: reduce) { .folder-row .folder-chevron { transition: none; } }
+/* The end-of-list drop line sits right after the last item, above the add buttons (not below them). */
+.project-add-row { position: relative; }
+.project-add-row.drop-end::before { content: ''; position: absolute; top: 3px; left: 0; right: 0; height: 2px; background: var(--accent); border-radius: 2px; pointer-events: none; }
