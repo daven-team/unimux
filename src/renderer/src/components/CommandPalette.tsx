@@ -18,7 +18,7 @@ import { ProviderIcon } from './ProviderIcons';
 import { cellCanExport, exportCellConversation } from '../convExport';
 import type { SessionInfo } from '../../../shared/types';
 import {
-  addAgent, closeTab, createProject, moveCellBy, quickTab, restartCell, restoreArchived, resumeSession, selectTab,
+  addAgent, closeTab, createProject, createProjectFolder, moveCellBy, quickTab, restartCell, restoreArchived, resumeSession, selectTab,
   sendSnippet, switchProject, toggleMaximize,
 } from '../actions';
 import { openSidebarPanel } from '../panelActions';
@@ -152,6 +152,7 @@ function PaletteInner() {
     out.push({ kind: tr('Akcja'), title: tr('Szukaj w rozmowach Claude i Codex…'), icon: <IHistory />, desc: keys('conversations.search') || undefined, run: () => setUi({ modal: { kind: 'conversations' } }) });
     out.push({ kind: tr('Akcja'), title: tr("Pokaż / ukryj snippety"), icon: <ISnippet />, desc: keys('snippets.toggle') || undefined, run: () => update((st) => ({ ...st, snippetsOpen: !st.snippetsOpen })) });
     out.push({ kind: tr('Akcja'), title: tr("Pokaż / ukryj notatki"), icon: <INoteBlank />, desc: keys('notes.toggle') || undefined, run: () => update((st) => ({ ...st, notesOpen: !st.notesOpen })) });
+    out.push({ kind: tr('Akcja'), title: tr('Nowy folder projektów'), icon: <IFolder />, desc: keys('folder.new') || undefined, run: () => void createProjectFolder() });
     out.push({ kind: tr('Akcja'), title: tr('Notatki: nowa notatka'), icon: <INoteBlank />, run: () => createNote() });
     out.push({ kind: tr('Akcja'), title: tr('Notatki: notatka dzienna'), icon: <ICalendar />, run: () => createNote('daily') });
     out.push({ kind: tr('Akcja'), title: tr('Notatki: nowa z zaznaczonego tekstu'), icon: <ICapture />, desc: keys('notes.capture') || undefined, run: () => captureSelectionToNote() });

@@ -15,7 +15,8 @@ import { snapshotCellRects } from './gridMotion';
 import { sessionSearchPaths } from '../../shared/sessionTrack';
 import { sshSpecName, sshStartEffects } from '../../shared/ssh';
 import type { CellSession, Profile, SessionInfo, Snippet, Tab, Worktree, WorktreeInspection, WorktreeInspectResult, WorktreeRemoveResult } from '../../shared/types';
-import { askChoice, getS, getUi, setUi, toast, update, type InstallThen } from './store';
+import { askChoice, askText, getS, getUi, setUi, toast, update, type InstallThen } from './store';
+import { addFolder, updateFolder } from '../../shared/projectFolders';
 import { confirmCloseWorking } from './closeGuard';
 import { namesList, workingAgents } from '../../shared/agentWork';
 import { flushDrafts, showTerminalTabs } from './files';
@@ -561,6 +562,21 @@ export function toggleMaximize(cellId?: string): void {
 }
 
 // ── projects ────────────────────────────────────────────────────────────────
+
+/** A new project folder at the end of the Projects panel (shown if hidden), named right away. Returns its id. */
+export async function createProjectFolder(): Promise<string> {
+  const name = tr('Nowy folder');
+  let id = '';
+  update((s) => { const r = addFolder({ ...s, sidebarCollapsed: false }, name); id = r.folderId; return r.state; });
+  setUi({ sidebarView: 'projects' });
+  await renameProjectFolder(id, name);
+  return id;
+}
+
+export async function renameProjectFolder(id: string, current: string): Promise<void> {
+  const next = await askText(tr('Nazwa folderu'), current);
+  if (next?.trim()) update((s) => updateFolder(s, id, { name: next.trim() }));
+}
 
 export async function createProject(): Promise<void> {
   const path = await window.mc.pickFolder();

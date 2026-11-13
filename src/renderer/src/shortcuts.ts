@@ -5,7 +5,7 @@ import { useEffect } from 'react';
 import { activeProject } from '../../shared/state';
 import { decideShortcut } from '../../shared/shortcutDispatch';
 import { displayCombo, matchShortcut, RepeatGuard, resolveShortcuts, shortcutDef, type ShortcutResolution } from '../../shared/shortcuts';
-import { addAgent, moveCellBy, moveFocus, quickTab, toggleMaximize } from './actions';
+import { addAgent, createProjectFolder, moveCellBy, moveFocus, quickTab, toggleMaximize } from './actions';
 import { closeFrontTab, cycleWorkspace, frontKey } from './workspaceStrip';
 import { getS, getUi, setUi, update, useStore } from './store';
 import { focusedTerminalCell, openTerminalFind } from './terminals/terminalFind';
@@ -81,6 +81,7 @@ function run(id: string, e: KeyboardEvent): void {
     case 'snippets.toggle': update((s) => ({ ...s, snippetsOpen: !s.snippetsOpen })); break;
     case 'notes.toggle': update((s) => ({ ...s, notesOpen: !s.notesOpen })); break;
     case 'notes.capture': captureSelectionToNote(); break;
+    case 'folder.new': void createProjectFolder(); break;
     case 'sidebar.toggle': update((s) => ({ ...s, sidebarCollapsed: !s.sidebarCollapsed })); break;
     case 'cell.maximize': toggleMaximize(); break;
     case 'cell.queue': openQueue(); break;

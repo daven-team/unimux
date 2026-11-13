@@ -1,15 +1,15 @@
-import { shortcutText } from '../shortcuts';
+import { shortcutText, titleWithShortcut } from '../shortcuts';
 import { useI18n } from '../i18n';
 import { useMemo, useState } from 'react';
 import { PROJECT_COLORS, renameTab, updateProject } from '../../../shared/state';
-import { addFolder, dropOnProject, folderOf, moveTreeItem, projectTree, removeFolder, treeNeighbour, updateFolder, type TreeItem, type TreeTarget } from '../../../shared/projectFolders';
+import { dropOnProject, folderOf, moveTreeItem, projectTree, removeFolder, treeNeighbour, updateFolder, type TreeItem, type TreeTarget } from '../../../shared/projectFolders';
 import { PANEL_LIMITS } from '../../../shared/panels';
 import type { StatusCounts } from '../../../shared/status';
 import { projectCountsKey } from '../../../shared/statusCounts';
 import { useStatusCounts } from '../statusCounts';
 import { describeLayout } from '../../../shared/layout';
 import type { Project, ProjectFolder } from '../../../shared/types';
-import { closeTab, createProject, relocateProject, removeProject, selectTab, switchProject } from '../actions';
+import { closeTab, createProject, createProjectFolder, relocateProject, removeProject, renameProjectFolder, selectTab, switchProject } from '../actions';
 import { askText, setUi, update, useStore } from '../store';
 import { useSshStore } from '../sshStore';
 import { openMenu } from './ContextMenu';
@@ -100,15 +100,8 @@ export function ProjectsPanel({ resize }: PanelProps) {
   const dragId = drag?.id ?? null;
   const endDrag = () => { setDrag(null); setOver(null); };
   const dragging = (e: React.DragEvent) => !!drag && (e.dataTransfer.types.includes(PROJECT_MIME) || e.dataTransfer.types.includes(FOLDER_MIME));
-  const renameFolder = async (folder: Pick<ProjectFolder, 'id' | 'name'>) => {
-    const name = await askText(tr("Nazwa folderu"), folder.name);
-    if (name?.trim()) update((st) => updateFolder(st, folder.id, { name: name.trim() }));
-  };
-  const newFolder = () => {
-    let id = '';
-    update((st) => { const r = addFolder(st, tr("Nowy folder")); id = r.folderId; return r.state; });
-    if (id) void renameFolder({ id, name: tr("Nowy folder") });
-  };
+  const renameFolder = (folder: Pick<ProjectFolder, 'id' | 'name'>) => renameProjectFolder(folder.id, folder.name);
+  const newFolder = () => void createProjectFolder();
   /** Drops the dragged item on a row: `into` a folder or onto a project, else next to it. */
   const dropOn = (target: { id: string; folderId: string | null; isFolder: boolean }, zone: DropZone) => {
     if (!drag) return;
@@ -137,7 +130,7 @@ export function ProjectsPanel({ resize }: PanelProps) {
     openMenu(e.clientX, e.clientY, [
       { header: tr("Panel projektów") },
       { label: tr("Dodaj projekt") + '…', icon: <IPlus />, onClick: () => void createProject() },
-      { label: tr("Nowy folder") + '…', icon: <IFolder />, onClick: newFolder },
+      { label: tr("Nowy folder") + '…', icon: <IFolder />, hint: shortcutText('folder.new') || undefined, onClick: newFolder },
       ...(project ? [
         { label: tr("Nowy grid") + '…', icon: <IGrid />, onClick: () => setUi({ modal: { kind: 'grid', projectId: project.id } }) },
         { label: tr("Przeglądaj pliki projektu"), icon: <IFile />, onClick: () => openFiles(project) },
@@ -330,7 +323,7 @@ export function ProjectsPanel({ resize }: PanelProps) {
       {projects.length > 0 && (
         <div className={`project-add-row ${over?.id === null ? 'drop-end' : ''}`}>
           <button className="btn project-add-inline" onClick={() => void createProject()} title={tr('Dodaj projekt')} aria-label={tr('Dodaj projekt')}><IPlus />{tr('Dodaj projekt')}</button>
-          <button className="btn project-add-inline folder-add" onClick={newFolder} title={tr('Nowy folder')} aria-label={tr('Nowy folder')}><IFolder />{tr('Nowy folder')}</button>
+          <button className="btn project-add-inline folder-add" onClick={newFolder} title={titleWithShortcut(tr('Nowy folder'), 'folder.new')} aria-label={tr('Nowy folder')}><IFolder />{tr('Nowy folder')}</button>
         </div>
       )}
       {projects.length > 0 && <div className="project-drop-space" aria-hidden="true" />}

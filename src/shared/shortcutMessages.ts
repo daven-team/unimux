@@ -24,6 +24,7 @@ export const shortcutMessages = {
   'Przesuń komórkę w górę': ['Move the cell up', 'Zelle nach oben verschieben', 'Mover la celda hacia arriba', 'Déplacer la cellule vers le haut', 'Mover a célula para cima'],
   'Przesuń komórkę w dół': ['Move the cell down', 'Zelle nach unten verschieben', 'Mover la celda hacia abajo', 'Déplacer la cellule vers le bas', 'Mover a célula para baixo'],
   'Pokaż lub ukryj snippety': ['Show or hide snippets', 'Snippets ein- oder ausblenden', 'Mostrar u ocultar los snippets', 'Afficher ou masquer les snippets', 'Mostrar ou ocultar os snippets'],
+  'Nowy folder projektów': ['New project folder', 'Neuer Projektordner', 'Nueva carpeta de proyectos', 'Nouveau dossier de projets', 'Nova pasta de projetos'],
   'Pokaż lub ukryj panel boczny': ['Show or hide the side panel', 'Seitenbereich ein- oder ausblenden', 'Mostrar u ocultar el panel lateral', 'Afficher ou masquer le panneau latéral', 'Mostrar ou ocultar o painel lateral'],
   'Zapisz plik w edytorze': ['Save the file in the editor', 'Datei im Editor speichern', 'Guardar el archivo en el editor', 'Enregistrer le fichier dans l’éditeur', 'Guardar o ficheiro no editor'],
   'Drzewo plików: zmień nazwę': ['File tree: rename', 'Dateibaum: umbenennen', 'Árbol de archivos: renombrar', 'Arborescence : renommer', 'Árvore de ficheiros: mudar o nome'],
