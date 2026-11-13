@@ -187,6 +187,9 @@ export function SettingsPage() {
             </option>)}
           </Select>
         </SettingRow>
+        <SettingRow title={tr('Płynne terminale przy obciążeniu')} htmlFor="settings-terminal-priority" hint={tr('Programy uruchomione w terminalach (agenci, kompilacje, testy) dostają niższy priorytet niż okno unimux. Gdy komputer jest zajęty, pisanie i przewijanie zostają płynne, a ciężkie zadania trwają minimalnie dłużej. Działa dla terminali uruchomionych po zmianie.')}>
+          <input id="settings-terminal-priority" className="setting-switch" type="checkbox" role="switch" checked={settings.terminalLowPriority !== false} onChange={(e) => setSetting({ terminalLowPriority: e.target.checked })} />
+        </SettingRow>
         <SettingRow title={tr('Wczytywanie sesji w tle po uruchomieniu')} htmlFor="settings-background-load" hint={tr(BACKGROUND_HINT[settings.backgroundLoad], { max: BACKGROUND_MAX_CELLS })}>
           <Select id="settings-background-load" className="select" value={settings.backgroundLoad}
             onChange={(e) => setSetting({ backgroundLoad: normalizeBackgroundLoad(e.target.value) })}>

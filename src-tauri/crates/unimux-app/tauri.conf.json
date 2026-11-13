@@ -34,6 +34,8 @@
       "webviewInstallMode": { "type": "embedBootstrapper", "silent": true },
       "nsis": {
         "installMode": "currentUser",
+        "installerIcon": "../../../resources/icon.ico",
+        "uninstallerIcon": "../../../resources/icon.ico",
         "languages": ["Polish", "English", "German", "Spanish", "French", "PortugueseBR"],
         "displayLanguageSelector": false,
         "installerHooks": "../../resources/installer-hooks.nsh"

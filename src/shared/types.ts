@@ -220,6 +220,8 @@ export interface Settings {
   confirmCloseWorking: boolean;
   /** Lines of history each terminal keeps (one of SCROLLBACK_CHOICES, shared/terminalLimits.ts). */
   scrollbackLines: number;
+  /** Programs in terminals run below normal priority so the app stays responsive under load (1.2.4; absent = on). */
+  terminalLowPriority?: boolean;
   /** Colour theme of SSH terminals (Settings > SSH); a host may choose its own (shared/sshThemes.ts). */
   sshTheme: SshThemeId;
   /** Command suggestions in SSH terminals and the host command history behind them; only `false` turns them off. */

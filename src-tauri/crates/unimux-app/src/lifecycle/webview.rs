@@ -70,6 +70,53 @@ pub fn watch_process_failed(_window: &WebviewWindow, _on_event: Arc<dyn Fn(Proce
     // macOS: tauri::Builder::on_web_content_process_terminate (main.rs) reports the renderer's end.
 }
 
+/// Raises the WebView2 browser, GPU and renderer processes above normal priority (Windows). They draw every terminal and take
+/// the keys, but the window belongs to unimux.exe, so Windows' foreground boost never reaches them: with a build using every
+/// core (in a cell or elsewhere) typing and scrolling lagged by 30-110 ms (scripts/perf-latency-load.mjs). Called at every
+/// page load of a window, so a restarted renderer and the renderer of a detached window get it too. Best effort.
+#[cfg(windows)]
+pub fn raise_priority(window: &WebviewWindow) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        COREWEBVIEW2_PROCESS_KIND, COREWEBVIEW2_PROCESS_KIND_BROWSER, COREWEBVIEW2_PROCESS_KIND_GPU,
+        COREWEBVIEW2_PROCESS_KIND_RENDERER, ICoreWebView2Environment8,
+    };
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{
+        ABOVE_NORMAL_PRIORITY_CLASS, OpenProcess, PROCESS_SET_INFORMATION, SetPriorityClass,
+    };
+    use windows::core::Interface;
+    let _ = window.with_webview(|webview| {
+        // SAFETY: COM calls on the UI thread (with_webview); the process handles are closed right away.
+        unsafe {
+            let Ok(env) = webview.environment().cast::<ICoreWebView2Environment8>() else { return };
+            let Ok(list) = env.GetProcessInfos() else { return };
+            let mut count = 0u32;
+            let _ = list.Count(&mut count);
+            for i in 0..count {
+                let Ok(info) = list.GetValueAtIndex(i) else { continue };
+                let mut kind = COREWEBVIEW2_PROCESS_KIND::default();
+                let mut pid = 0i32;
+                if info.Kind(&mut kind).is_err() || info.ProcessId(&mut pid).is_err() || pid <= 0 {
+                    continue;
+                }
+                if kind != COREWEBVIEW2_PROCESS_KIND_BROWSER
+                    && kind != COREWEBVIEW2_PROCESS_KIND_GPU
+                    && kind != COREWEBVIEW2_PROCESS_KIND_RENDERER
+                {
+                    continue;
+                }
+                if let Ok(h) = OpenProcess(PROCESS_SET_INFORMATION, false, pid as u32) {
+                    let _ = SetPriorityClass(h, ABOVE_NORMAL_PRIORITY_CLASS);
+                    let _ = CloseHandle(h);
+                }
+            }
+        }
+    });
+}
+
+#[cfg(not(windows))]
+pub fn raise_priority(_window: &WebviewWindow) {}
+
 /// The pid of the renderer process that runs this window's page (Windows; None when WebView2 cannot tell). Waits up to 3 s.
 #[cfg(windows)]
 pub fn renderer_pid(window: &WebviewWindow) -> Option<u32> {

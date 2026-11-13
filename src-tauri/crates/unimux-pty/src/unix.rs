@@ -371,6 +371,7 @@ impl Pty {
         // here like node-pty's (chdir, `environ = env`, execvp, so PATH comes from the cell environment): a cwd that is
         // gone or a program that does not start gives a terminal that exits with code 1 (Linux: with perror's text), not
         // a spawn error, as in 1.1.4. `Command`'s own exec is never reached.
+        let low = crate::low_priority();
         let mut cmd = Command::new(&opts.file);
         cmd.stdin(Stdio::from(slave.try_clone()?))
             .stdout(Stdio::from(slave.try_clone()?))
@@ -380,6 +381,10 @@ impl Pty {
             cmd.pre_exec(move || {
                 if libc::setsid() < 0 {
                     return Err(io::Error::last_os_error());
+                }
+                // Below the app (see unimux_pty::set_low_priority); a failure only keeps the normal priority.
+                if low {
+                    libc::setpriority(libc::PRIO_PROCESS, 0, 5);
                 }
                 if libc::ioctl(0, libc::TIOCSCTTY as _, 0) < 0 {
                     return Err(io::Error::last_os_error());

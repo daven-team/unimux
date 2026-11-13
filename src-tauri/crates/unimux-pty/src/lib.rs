@@ -39,3 +39,16 @@ pub mod supervisor;
 pub mod timers;
 #[cfg(unix)]
 pub mod unix;
+
+/// Programs started in terminals run below normal priority (Windows BELOW_NORMAL_PRIORITY_CLASS, Unix nice 5; their children
+/// inherit it): a build in one cell (one compiler per core) then no longer delays typing, scrolling and drawing in every
+/// terminal. On an idle machine they run as fast as before. On by default; the app sets it from the setting before a spawn.
+static LOW_PRIORITY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub fn set_low_priority(on: bool) {
+    LOW_PRIORITY.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn low_priority() -> bool {
+    LOW_PRIORITY.load(std::sync::atomic::Ordering::Relaxed)
+}

@@ -357,11 +357,12 @@ impl Host for TauriHost {
             .focused(false)
             .initialization_script(windows::boot_script(&ctx, &label))
             .on_navigation(windows::allow_navigation)
-            .on_page_load(move |_window, payload| {
+            .on_page_load(move |window, payload| {
                 let Some(svc) = page_service.upgrade() else { return };
                 match payload.event() {
                     PageLoadEvent::Started => svc.page_started(&page_id),
                     PageLoadEvent::Finished => {
+                        crate::lifecycle::webview::raise_priority(&window);
                         svc.page_loaded(&page_id);
                         if let Some(host) = page_host.upgrade() {
                             host.page_finished(&page_id);

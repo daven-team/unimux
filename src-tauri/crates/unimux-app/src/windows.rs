@@ -103,8 +103,11 @@ pub fn create_main(app: &AppHandle, ctx: &Arc<AppContext>) -> tauri::Result<Webv
         .visible(false)
         .initialization_script(boot_script(ctx, MAIN))
         .on_navigation(allow_navigation)
-        .on_page_load(move |_window, payload| {
+        .on_page_load(move |window, payload| {
             let finished = payload.event() == PageLoadEvent::Finished;
+            if finished {
+                crate::lifecycle::webview::raise_priority(&window);
+            }
             crate::lifecycle::page_load(&page_ctx, MAIN, finished);
             if !finished {
                 page_ctx.main_page_started();
