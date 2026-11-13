@@ -5843,7 +5843,7 @@ checksum = "c6f5d3c3b1bf09027a88a6bc961fc00497d651009560b5463668dc81b0fa87a8"
 
 [[package]]
 name = "unimux-accounts"
-version = "1.2.3"
+version = "1.2.4"
 dependencies = [
  "base64 0.23.1",
  "bytes",
@@ -5878,7 +5878,7 @@ dependencies = [
 
 [[package]]
 name = "unimux-agents"
-version = "1.2.3"
+version = "1.2.4"
 dependencies = [
  "base64 0.23.1",
  "bytes",
@@ -5907,7 +5907,7 @@ dependencies = [
 
 [[package]]
 name = "unimux-app"
-version = "1.2.3"
+version = "1.2.4"
 dependencies = [
  "futures",
  "objc2",
@@ -5948,7 +5948,7 @@ dependencies = [
 
 [[package]]
 name = "unimux-core"
-version = "1.2.3"
+version = "1.2.4"
 dependencies = [
  "dirs",
  "dunce",
@@ -5963,7 +5963,7 @@ dependencies = [
 
 [[package]]
 name = "unimux-db"
-version = "1.2.3"
+version = "1.2.4"
 dependencies = [
  "base64 0.23.1",
  "bytes",
@@ -6001,7 +6001,7 @@ dependencies = [
 
 [[package]]
 name = "unimux-exec"
-version = "1.2.3"
+version = "1.2.4"
 dependencies = [
  "libc",
  "tempfile",
@@ -6012,7 +6012,7 @@ dependencies = [
 
 [[package]]
 name = "unimux-files"
-version = "1.2.3"
+version = "1.2.4"
 dependencies = [
  "base64 0.23.1",
  "encoding_rs",
@@ -6037,7 +6037,7 @@ dependencies = [
 
 [[package]]
 name = "unimux-git"
-version = "1.2.3"
+version = "1.2.4"
 dependencies = [
  "futures",
  "indexmap 2.14.2",
@@ -6059,7 +6059,7 @@ dependencies = [
 
 [[package]]
 name = "unimux-hostd"
-version = "1.2.3"
+version = "1.2.4"
 dependencies = [
  "libc",
  "parking_lot 0.13.0",
@@ -6070,7 +6070,7 @@ dependencies = [
 
 [[package]]
 name = "unimux-ipc"
-version = "1.2.3"
+version = "1.2.4"
 dependencies = [
  "futures",
  "parking_lot 0.13.0",
@@ -6082,7 +6082,7 @@ dependencies = [
 
 [[package]]
 name = "unimux-mcp"
-version = "1.2.3"
+version = "1.2.4"
 dependencies = [
  "bytes",
  "futures",
@@ -6104,7 +6104,7 @@ dependencies = [
 
 [[package]]
 name = "unimux-net"
-version = "1.2.3"
+version = "1.2.4"
 dependencies = [
  "bytes",
  "core-foundation",
@@ -6129,7 +6129,7 @@ dependencies = [
 
 [[package]]
 name = "unimux-oscrypt"
-version = "1.2.3"
+version = "1.2.4"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -6149,7 +6149,7 @@ dependencies = [
 
 [[package]]
 name = "unimux-platform"
-version = "1.2.3"
+version = "1.2.4"
 dependencies = [
  "block2",
  "junction",
@@ -6170,7 +6170,7 @@ dependencies = [
 
 [[package]]
 name = "unimux-pty"
-version = "1.2.3"
+version = "1.2.4"
 dependencies = [
  "libc",
  "parking_lot 0.13.0",
@@ -6184,7 +6184,7 @@ dependencies = [
 
 [[package]]
 name = "unimux-sftp"
-version = "1.2.3"
+version = "1.2.4"
 dependencies = [
  "base64 0.23.1",
  "futures",
@@ -6206,7 +6206,7 @@ dependencies = [
 
 [[package]]
 name = "unimux-ssh"
-version = "1.2.3"
+version = "1.2.4"
 dependencies = [
  "aes",
  "base64 0.23.1",
@@ -6237,7 +6237,7 @@ dependencies = [
 
 [[package]]
 name = "unimux-state"
-version = "1.2.3"
+version = "1.2.4"
 dependencies = [
  "parking_lot 0.13.0",
  "rusty-leveldb",
@@ -6252,7 +6252,7 @@ dependencies = [
 
 [[package]]
 name = "unimux-update"
-version = "1.2.3"
+version = "1.2.4"
 dependencies = [
  "base64 0.23.1",
  "flate2",
