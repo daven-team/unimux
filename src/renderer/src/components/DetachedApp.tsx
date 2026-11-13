@@ -32,6 +32,7 @@ import { isPermissionAnswer } from '../../../shared/permissionAction';
 import { profileOptionLabel } from '../cliUi';
 import { noteAgentTurnEnd } from '../turnRefresh';
 import { initWaitTracking, revealCell } from '../waiting';
+import { initTurnTracking } from '../turnTimer';
 import { detachedId, thisDetached } from '../windowRole';
 import { openMenuAt, ContextMenuHost } from './ContextMenu';
 import { ErrorBoundary, PanelFallback, WindowFallback } from './ErrorBoundary';
@@ -173,6 +174,7 @@ async function boot(): Promise<void> {
   setUi({ focusedCellId: tab?.cells[0]?.id ?? null });
   // 1.0.9: this window's cells report what they wait for; the main window lists them.
   initWaitTracking();
+  initTurnTracking();
 }
 
 /** This window's unsaved database and editor work goes to the main window (its quit and update questions count it), whenever it changes. */

@@ -5,7 +5,7 @@ import { useEffect } from 'react';
 import { activeProject } from '../../shared/state';
 import { decideShortcut } from '../../shared/shortcutDispatch';
 import { displayCombo, matchShortcut, RepeatGuard, resolveShortcuts, shortcutDef, type ShortcutResolution } from '../../shared/shortcuts';
-import { addAgent, createProjectFolder, moveCellBy, moveFocus, quickTab, toggleMaximize } from './actions';
+import { addAgent, createProjectFolder, focusCellAt, moveCellBy, moveFocus, quickTab, toggleMaximize } from './actions';
 import { closeFrontTab, cycleWorkspace, frontKey } from './workspaceStrip';
 import { getS, getUi, setUi, update, useStore } from './store';
 import { focusedTerminalCell, openTerminalFind } from './terminals/terminalFind';
@@ -102,6 +102,11 @@ function run(id: string, e: KeyboardEvent): void {
     case 'cell.move.down': moveCellBy(0, 1); break;
     case 'waiting.next': stepToWaiting(1); break;
     case 'waiting.prev': stepToWaiting(-1); break;
+    default: {
+      // cell.goto.1 .. cell.goto.9: cell N of the grid on screen.
+      const goto = /^cell\.goto\.([1-9])$/.exec(id);
+      if (goto) focusCellAt(Number(goto[1]));
+    }
   }
 }
 

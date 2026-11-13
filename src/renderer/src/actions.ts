@@ -2,7 +2,7 @@ import { errorText, tr } from './i18n';
 // High-level user actions: they combine state transitions with pty/terminal side effects.
 import type { GridLayout } from '../../shared/layout';
 import { normalizeProjectPath } from '../../shared/platform';
-import { layoutForCount } from '../../shared/layout';
+import { layoutForCount, readingOrder } from '../../shared/layout';
 import { CELL_HEAD_HEIGHT, cellBodyBox, chooseGridSize, type Size } from '../../shared/cellBox';
 import {
   activeProject, activeTab, addCell, addProject, addTab, cellCwd, cellWorktreeUse, closeTab as closeTabState, ensureShellProfile, findCell, getProfile,
@@ -530,6 +530,14 @@ export function moveFocus(dx: number, dy: number): void {
   const idx = Math.max(0, tab.cells.findIndex((c) => c.id === getUi().focusedCellId));
   const best = neighborSlot(tab.layout.areas, idx, dx, dy);
   if (best >= 0 && tab.cells[best]) focusCell(tab.cells[best].id);
+}
+
+/** Focuses cell `n` (1-based) of the active tab in reading order (Mod+1..9); a grid with fewer cells ignores it. */
+export function focusCellAt(n: number): void {
+  const tab = activeTab(activeProject(getS()));
+  const index = tab ? readingOrder(tab.layout)[n - 1] : undefined;
+  const cell = index === undefined ? undefined : tab?.cells[index];
+  if (cell) focusCell(cell.id);
 }
 
 /** Swaps two cells of the active tab (drag and drop, keyboard); their ptys are untouched. */

@@ -337,6 +337,7 @@ export function routeMessage(channel: string, args: readonly unknown[], owners: 
 export const DETACHED_GRID_SHORTCUTS: ReadonlySet<string> = new Set([
   'agent.add', 'cell.maximize', 'cell.focus.left', 'cell.focus.right', 'cell.focus.up', 'cell.focus.down',
   'cell.move.left', 'cell.move.right', 'cell.move.up', 'cell.move.down', 'terminal.find', 'cell.queue', 'waiting.next', 'waiting.prev',
+  'cell.goto.1', 'cell.goto.2', 'cell.goto.3', 'cell.goto.4', 'cell.goto.5', 'cell.goto.6', 'cell.goto.7', 'cell.goto.8', 'cell.goto.9',
 ]);
 /** 1.0.9: "next / previous waiting cell" works from any window (the main window picks the cell). */
 export const DETACHED_FILE_SHORTCUTS: ReadonlySet<string> = new Set(['waiting.next', 'waiting.prev']);

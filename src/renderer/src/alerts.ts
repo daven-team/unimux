@@ -8,6 +8,7 @@ import { playAlertSound } from './alertSound';
 import { profileName } from './cliUi';
 import { tr } from './i18n';
 import { getS, getUi } from './store';
+import { freshTurnTook } from './turnTimer';
 import { statusLog, terminals } from './terminals/TerminalManager';
 import { noticeActions } from '../../shared/permissionAction';
 
@@ -59,6 +60,7 @@ export function alertForStatus(
   if (decision.notify) {
     burst.push({
       event: decision.event, cellId, label: cellLabel(found.cell, getUi().sessionTitles, profileName(profile, tr)), errorCode: info?.error,
+      took: decision.event === 'done' ? freshTurnTook(cellId) : undefined,
       projectId: found.project.id, projectName: found.project.name, tabId: found.tab.id, tabName: found.tab.name,
     });
   }

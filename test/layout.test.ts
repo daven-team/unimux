@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   areaRects, createLayout, describeLayout, dividerBox, dividers, growLayout, layoutForCount, layoutFromRows, mergeRect, MIN_AREA_SHARE, minShareFor,
-  removeArea, resetDivider, resizeDivider, rowCountsOf, unmergeAll, type GridLayout,
+  readingOrder, removeArea, resetDivider, resizeDivider, rowCountsOf, unmergeAll, type GridLayout,
 } from '../src/shared/layout';
 
 describe('layout', () => {
@@ -311,5 +311,15 @@ describe('1.0.7 minimum cell size of a divider drag', () => {
     const moved = resizeDivider(layout, row, -0.45, { col: 0.1, row: 0.3 });
     const heights = areaRects(moved).map((r) => r.y1 - r.y0);
     expect(Math.min(...heights)).toBeGreaterThanOrEqual(0.3 - 1e-6);
+  });
+});
+
+describe('readingOrder', () => {
+  it('goes row by row, left to right, whatever order the areas are stored in', () => {
+    expect(readingOrder(createLayout(3, 2))).toEqual([0, 1, 2, 3, 4, 5]);
+    const shuffled: GridLayout = { cols: 2, rows: 2, areas: [
+      { col: 1, row: 1, colSpan: 1, rowSpan: 1 }, { col: 0, row: 0, colSpan: 1, rowSpan: 2 }, { col: 1, row: 0, colSpan: 1, rowSpan: 1 },
+    ] };
+    expect(readingOrder(shuffled)).toEqual([1, 2, 0]);
   });
 });

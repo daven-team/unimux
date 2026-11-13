@@ -1,5 +1,8 @@
 // Texts of the status diagnostics (command palette). Each row: English, German, Spanish, French, Portuguese.
+import { turnTimerMessages } from './turnTimerMessages';
+
 export const statusMessages = {
+  ...turnTimerMessages,
   'Skopiuj dziennik statusów': ['Copy status log', 'Statusprotokoll kopieren', 'Copiar registro de estados', 'Copier le journal des statuts', 'Copiar registo de estados'],
   'Skopiowano dziennik statusów. Wpisów: {count}': [
     'Status log copied ({count} entries)',

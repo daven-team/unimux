@@ -11,6 +11,7 @@ import { initDetachFollow } from './detach';
 import { initPromptQueue } from './promptQueue';
 import { initAgentPrompt } from './agentPrompt';
 import { initWaitTracking, revealCell } from './waiting';
+import { initTurnTracking } from './turnTimer';
 import { noteAgentTurnEnd } from './turnRefresh';
 import { initBackgroundLoader } from './backgroundLoader';
 import { applyCliStatus, flushPendingSaves, ensureStarted, hasBlockedCells, recheckCli, refreshSessionTitles, resetStarted, releaseCellTerminal, setAliveAtStart } from './actions';
@@ -269,6 +270,7 @@ async function bootRest(mcpInfo: Awaited<ReturnType<typeof window.mc.getMcpInfo>
   bootStep(initAgentPrompt);
   // 1.0.9: what the cells wait for (the "Czeka na Ciebie" list), this window's and the detached windows'.
   bootStep(initWaitTracking);
+  bootStep(initTurnTracking);
 }
 
 /**

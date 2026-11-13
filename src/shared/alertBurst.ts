@@ -3,6 +3,7 @@
 import { errorPhrase, type AlertEventId } from './alerts';
 import { namesList } from './agentWork';
 import type { MessageKey, MessageParams } from './i18n';
+import { turnDuration } from './turnTimer';
 
 export type Translate = (key: MessageKey, params?: MessageParams) => string;
 
@@ -16,6 +17,8 @@ export interface AlertItem {
   tabId: string;
   tabName: string;
   errorCode?: string;
+  /** How long the finished turn took (ms), when known. */
+  took?: number;
 }
 
 export interface AlertNotice { title: string; body: string; cellId: string }
@@ -23,11 +26,13 @@ export interface AlertNotice { title: string; body: string; cellId: string }
 /** How long the first alert of a burst waits for the others. */
 export const ALERT_BURST_MS = 1000;
 
-/** Body of one agent's notification: what happened to it (and for an error, the human phrase of its code). */
-export function alertBody(t: Translate, event: AlertEventId, name: string, errorCode?: string): string {
+/** Body of one agent's notification: what happened to it (for an error, the human phrase of its code; for a finished turn, how long it took when known). */
+export function alertBody(t: Translate, event: AlertEventId, name: string, errorCode?: string, took?: number): string {
   if (event === 'attention') return t('{name} potrzebuje Ciebie', { name });
   if (event === 'error') return t('{name} - błąd: {detail}', { name, detail: t(errorPhrase(errorCode)) });
-  return t('{name} skończył pracę', { name });
+  if (took === undefined) return t('{name} skończył pracę', { name });
+  const time = turnDuration(took);
+  return t('{name} skończył pracę po {time}', { name, time: t(time.key, time.params) });
 }
 
 /** The alerts of one burst grouped by event (in the order they first came), each cell once (its latest alert counts). */
@@ -58,7 +63,7 @@ export function alertNotice(t: Translate, group: readonly AlertItem[]): AlertNot
   const oneProject = group.every((item) => item.projectId === first.projectId);
   const oneTab = oneProject && group.every((item) => item.tabId === first.tabId);
   const title = oneTab ? `${first.projectName} · ${first.tabName}` : oneProject ? first.projectName : 'unimux';
-  if (group.length === 1) return { title, body: alertBody(t, first.event, first.label, first.errorCode), cellId: first.cellId };
+  if (group.length === 1) return { title, body: alertBody(t, first.event, first.label, first.errorCode, first.took), cellId: first.cellId };
   const keys = COMBINED[first.event];
   const params = { project: first.projectName, count: group.length, names: namesList(group.map((item) => item.label)) };
   return { title, body: t(oneProject ? keys.inProject : keys.anywhere, params), cellId: first.cellId };

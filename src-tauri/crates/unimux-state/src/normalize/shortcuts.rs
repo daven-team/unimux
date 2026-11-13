@@ -29,7 +29,7 @@ const fn def(id: &'static str, scope: Scope, default: Option<&'static str>, rebi
 }
 
 use Scope::*;
-const DEFS: [Def; 45] = [
+const DEFS: [Def; 55] = [
     def("palette.open", Global, Some("Mod+K"), true),
     def("palette.openAlt", Global, Some("Mod+Shift+P"), true),
     def("modal.save", Modal, Some("Mod+Enter"), true),
@@ -52,6 +52,15 @@ const DEFS: [Def; 45] = [
     def("cell.move.right", Cell, Some("Mod+Alt+Shift+Right"), true),
     def("cell.move.up", Cell, Some("Mod+Alt+Shift+Up"), true),
     def("cell.move.down", Cell, Some("Mod+Alt+Shift+Down"), true),
+    def("cell.goto.1", Global, Some("Mod+1"), true),
+    def("cell.goto.2", Global, Some("Mod+2"), true),
+    def("cell.goto.3", Global, Some("Mod+3"), true),
+    def("cell.goto.4", Global, Some("Mod+4"), true),
+    def("cell.goto.5", Global, Some("Mod+5"), true),
+    def("cell.goto.6", Global, Some("Mod+6"), true),
+    def("cell.goto.7", Global, Some("Mod+7"), true),
+    def("cell.goto.8", Global, Some("Mod+8"), true),
+    def("cell.goto.9", Global, Some("Mod+9"), true),
     def("cell.queue", Cell, Some("Mod+Shift+D"), true),
     def("agents.prompt", Global, Some("Mod+Shift+U"), true),
     def("waiting.next", Global, Some("Mod+Alt+PageDown"), true),
@@ -60,6 +69,7 @@ const DEFS: [Def; 45] = [
     def("snippets.toggle", Global, Some("Mod+Shift+B"), true),
     def("notes.toggle", Global, Some("Mod+Shift+O"), true),
     def("notes.capture", Global, Some("Mod+Shift+L"), true),
+    def("folder.new", Global, Some("Mod+Shift+K"), true),
     def("sidebar.toggle", Global, Some("Mod+Shift+E"), true),
     def("git.commit", GitPanel, Some("Mod+Enter"), true),
     def("editor.save", Editor, Some("Mod+S"), true),
@@ -431,7 +441,7 @@ mod tests {
 
     #[test]
     fn overrides_keep_only_usable_ones() {
-        let raw = json!({"palette.open": "Ctrl+Shift+K", "unknown": "Ctrl+J", "terminal.copy": "Ctrl+Q", "tab.right": null, "agent.add": "Ctrl+Shift+K", "sidebar.toggle": "Ctrl+E"});
-        assert_eq!(normalize_overrides(Some(&raw), Platform::Win32), json!({"palette.open": "Ctrl+Shift+K", "tab.right": null}));
+        let raw = json!({"palette.open": "Ctrl+Shift+J", "unknown": "Ctrl+J", "terminal.copy": "Ctrl+Q", "tab.right": null, "agent.add": "Ctrl+Shift+J", "sidebar.toggle": "Ctrl+E"});
+        assert_eq!(normalize_overrides(Some(&raw), Platform::Win32), json!({"palette.open": "Ctrl+Shift+J", "tab.right": null}));
     }
 }

@@ -28,6 +28,12 @@ const GROW_STEPS: Array<[number, number]> = [[1, 1], [2, 2], [2, 4], [3, 6], [3,
 
 const sortAreas = (areas: Area[]) => [...areas].sort((a, b) => a.row - b.row || a.col - b.col);
 
+/** The area indices in reading order: rows top to bottom, then columns left to right (the "go to cell N" shortcuts). */
+export function readingOrder(layout: GridLayout): number[] {
+  const { areas } = layout;
+  return areas.map((_, i) => i).sort((a, b) => areas[a].row - areas[b].row || areas[a].col - areas[b].col);
+}
+
 export function createLayout(cols: number, rows: number): GridLayout {
   const areas: Area[] = [];
   for (let row = 0; row < rows; row++)

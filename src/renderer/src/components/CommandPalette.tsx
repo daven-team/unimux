@@ -10,7 +10,8 @@ import { ICalendar, ICapture, INoteBlank } from './notesIcons';
 import { strictFieldFilter } from '../../../shared/fuzzy';
 import type { MessageKey } from '../../../shared/i18n';
 import { describeLayout } from '../../../shared/layout';
-import { activeProject, activeTab, findCell } from '../../../shared/state';
+import { activeProject, activeTab, findCell, getProfile } from '../../../shared/state';
+import { cellLabel } from '../../../shared/agentWork';
 import { openQueue, queueCapable } from '../promptQueue';
 import { openAgentPrompt } from '../agentPrompt';
 import { agentTargets } from '../../../shared/agentPrompt';
@@ -18,10 +19,11 @@ import { ProviderIcon } from './ProviderIcons';
 import { cellCanExport, exportCellConversation } from '../convExport';
 import type { SessionInfo } from '../../../shared/types';
 import {
-  addAgent, closeTab, createProject, createProjectFolder, moveCellBy, quickTab, restartCell, restoreArchived, resumeSession, selectTab,
+  addAgent, closeTab, createProject, createProjectFolder, focusCell, moveCellBy, quickTab, restartCell, restoreArchived, resumeSession, selectTab,
   sendSnippet, switchProject, toggleMaximize,
 } from '../actions';
 import { openSidebarPanel } from '../panelActions';
+import { gridAgentActions } from '../gridActions';
 import { openTemplate, saveGridAsTemplate } from '../templates';
 import { templatesFor } from '../../../shared/gridTemplates';
 import { openSshView, reconnectAllSsh, reconnectAllTargetsOf } from '../ssh';
@@ -76,6 +78,7 @@ function PaletteInner() {
   const keys = useShortcutText();
   const s = useStore((st) => st.s);
   const cliStatus = useStore((st) => st.ui.cliStatus);
+  const sessionTitles = useStore((st) => st.ui.sessionTitles);
   const { providers: usageCards } = useUsage();
   const [q, setQ] = useState('');
   const [sel, setSel] = useState(0);
@@ -96,9 +99,12 @@ function PaletteInner() {
     // 1.0.9: the cells that wait for you come first (there are few, and they are what the user is most likely after).
     const waitingNow = Date.now();
     const owners = cellOwners(s);
+    /** Cells already listed as waiting: the "every agent" rows below leave them out. */
+    const listedWaiting = new Set<string>();
     for (const entry of currentWaiting()) {
       const info = waitingRowInfo(s, entry, getUi().sessionTitles, tr, owners);
       if (!info) continue;
+      listedWaiting.add(entry.cellId);
       const what = waitText(entry);
       const age = waitAge(entry.since, waitingNow);
       out.push({ kind: tr('Czeka na Ciebie'), title: info.label, icon: <TWaiting />, desc: `${tr(what.key, what.params)} · ${tr(age.key, age.params)} · ${info.place}`, run: () => revealWaiting(entry.cellId) });
@@ -124,6 +130,8 @@ function PaletteInner() {
       out.push({ kind: tr('Akcja'), title: tr("Otwórz projekt w Cursorze"), icon: <ICodeEditor />, run: () => window.mc.openInEditor(project.path) });
       if (tab) out.push({ kind: tr('Akcja'), title: tr('Zapisz grid „{name}” jako szablon…', { name: tab.name }), icon: <IGrid />, run: () => void saveGridAsTemplate(project.id, tab.id) });
       if (tab) out.push({ kind: tr('Akcja'), title: tr('Zamknij zakładkę „{name}”', { name: tab.name }), icon: <IX />, desc: keys('tab.close') || undefined, run: () => void closeTab(project.id, tab.id) });
+      // Every agent of the grid on screen at once (the grid tab's menu offers the same).
+      if (tab) for (const a of gridAgentActions(project.id, tab.id)) out.push({ kind: tr('Akcja'), title: a.title, icon: a.id === 'restart' ? <IRestart /> : <IGrid />, desc: tab.name, run: a.run });
     }
     if (focused) {
       out.push({ kind: tr('Akcja'), title: tr("Maksymalizuj / przywróć komórkę"), icon: <IMax />, desc: keys('cell.maximize') || undefined, run: () => toggleMaximize(focused) });
@@ -193,6 +201,19 @@ function PaletteInner() {
     for (const p of s.projects)
       for (const t of p.tabs)
         out.push({ kind: tr('Zakładka'), title: t.name, desc: `${p.name} · ${describeLayout(t.layout)}`, run: () => selectTab(p.id, t) });
+    // Every Claude and Codex cell of the open grids: the header's name, the conversation title when the name is another one,
+    // then where it is; Enter switches the project and grid and focuses the cell (a detached grid's window comes up).
+    for (const p of s.projects)
+      for (const t of p.tabs)
+        for (const c of t.cells) {
+          if (c.ssh || listedWaiting.has(c.id)) continue;
+          const profile = getProfile(s, c.profileId);
+          if (profile.cli === 'shell') continue;
+          const title = cellLabel(c, sessionTitles, profile.name);
+          const conversation = c.session ? sessionTitles[c.session.id]?.trim() : undefined;
+          const where = `${p.name} · ${t.name}`;
+          out.push({ kind: tr('Agent'), title, icon: <ProviderIcon provider={profile.cli} size={14} />, desc: conversation && conversation !== title ? `${conversation} · ${where}` : where, run: () => focusCell(c.id) });
+        }
     for (const sn of s.snippets.filter((x) => !x.projectId || x.projectId === project?.id))
       out.push({ kind: tr('Snippet'), title: sn.name, desc: tr("Enter: aktywna · Shift+Enter: wszystkie"), run: (shift) => sendSnippet(sn, shift ? 'all' : 'focused') });
     if (project) {
@@ -210,7 +231,7 @@ function PaletteInner() {
         out.push({ kind: x.cli, title: x.title, desc: tr("wznów w nowej zakładce · Shift: w nowej komórce"), run: (shift) => resumeSession(x, shift ? 'newCell' : 'newTab') });
     }
     return out;
-  }, [s, sessions, project, tr, cliStatus, keys, usageCards]);
+  }, [s, sessions, project, tr, cliStatus, keys, usageCards, sessionTitles]);
 
   // Only a new query or new items filter again; moving the highlight (mouse, arrows) just re-renders the list.
   // 1.0.7: strict matching (word starts and contiguous runs, the title first), no scattered single letters.

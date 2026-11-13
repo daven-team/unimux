@@ -189,6 +189,17 @@ export const SHORTCUTS = [
   { id: 'cell.move.right', label: 'Przesuń komórkę w prawo', group: 'grid', scope: 'cell', default: 'Mod+Alt+Shift+Right', rebindable: true, blockedInSettings: true },
   { id: 'cell.move.up', label: 'Przesuń komórkę w górę', group: 'grid', scope: 'cell', default: 'Mod+Alt+Shift+Up', rebindable: true, blockedInSettings: true },
   { id: 'cell.move.down', label: 'Przesuń komórkę w dół', group: 'grid', scope: 'cell', default: 'Mod+Alt+Shift+Down', rebindable: true, blockedInSettings: true },
+  // Cell N of the grid on screen in reading order (rows top to bottom, then left to right), like a browser's tabs.
+  // Ctrl+2..8 are control codes in a terminal, but as these actions' own defaults they are taken over on purpose.
+  { id: 'cell.goto.1', label: 'Przejdź do komórki 1', group: 'grid', scope: 'global', default: 'Mod+1', rebindable: true, blockedInSettings: true },
+  { id: 'cell.goto.2', label: 'Przejdź do komórki 2', group: 'grid', scope: 'global', default: 'Mod+2', rebindable: true, blockedInSettings: true },
+  { id: 'cell.goto.3', label: 'Przejdź do komórki 3', group: 'grid', scope: 'global', default: 'Mod+3', rebindable: true, blockedInSettings: true },
+  { id: 'cell.goto.4', label: 'Przejdź do komórki 4', group: 'grid', scope: 'global', default: 'Mod+4', rebindable: true, blockedInSettings: true },
+  { id: 'cell.goto.5', label: 'Przejdź do komórki 5', group: 'grid', scope: 'global', default: 'Mod+5', rebindable: true, blockedInSettings: true },
+  { id: 'cell.goto.6', label: 'Przejdź do komórki 6', group: 'grid', scope: 'global', default: 'Mod+6', rebindable: true, blockedInSettings: true },
+  { id: 'cell.goto.7', label: 'Przejdź do komórki 7', group: 'grid', scope: 'global', default: 'Mod+7', rebindable: true, blockedInSettings: true },
+  { id: 'cell.goto.8', label: 'Przejdź do komórki 8', group: 'grid', scope: 'global', default: 'Mod+8', rebindable: true, blockedInSettings: true },
+  { id: 'cell.goto.9', label: 'Przejdź do komórki 9', group: 'grid', scope: 'global', default: 'Mod+9', rebindable: true, blockedInSettings: true },
   // 1.0.9: the prompt queue of the cell in focus, with its add field ready (renderer/promptQueue.ts).
   { id: 'cell.queue', label: 'Dodaj prompt do kolejki komórki', group: 'grid', scope: 'cell', default: 'Mod+Shift+D', rebindable: true, blockedInSettings: true },
   // 1.0.9: the cells that wait for you (shared/waiting.ts), longest waiting first, across every grid and window.

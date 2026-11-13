@@ -11,6 +11,7 @@ import { addAgent, closeTab, selectTab } from '../actions';
 import { getS, setUi, update, useStore } from '../store';
 import { agentTargets } from '../../../shared/agentPrompt';
 import { openAgentPrompt } from '../agentPrompt';
+import { gridAgentActions } from '../gridActions';
 import { newGridFromTemplateItems, saveGridAsTemplate } from '../templates';
 import { profileOptionLabel } from '../cliUi';
 import { openMenu, openMenuAt } from './ContextMenu';
@@ -382,6 +383,8 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
                     ...(agentTargets(getS()).some((a) => a.tabId === t.id) ? [{ label: tr('Wyślij prompt do agentów tego gridu…'), hint: shortcutText('agents.prompt') || undefined, onClick: () => openAgentPrompt(t.id) }] : []),
                     ...(t.cells.some((c) => c.ssh) ? [{ label: tr('Wysyłanie masowe'), onClick: () => setUi({ modal: { kind: 'broadcast', projectId: project.id, tabId: t.id } }) }] : []),
                     ...(reconnectAllTargetsOf(project.id, t.id).length ? [{ label: tr('Połącz ponownie wszystkie SSH'), icon: <IRestart />, onClick: () => reconnectAllSsh(project.id, t.id) }] : []),
+                    // Every agent of the grid at once: interrupt, restart and resume, mute or unmute (gridActions.ts).
+                    ...gridAgentActions(project.id, t.id).map((a) => ({ label: a.title, ...(a.id === 'restart' ? { icon: <IRestart /> } : {}), onClick: a.run })),
                     { label: tr('Przenieś do nowego okna'), icon: <IPopOut />, onClick: () => void detachKey(`grid:${t.id}`, 'menu') },
                     { sep: true },
                     { label: tr("Zamknij (do historii)"), icon: <IX />, danger: true, onClick: () => void closeTab(project.id, t.id), hint: shortcutText('tab.close') || undefined },

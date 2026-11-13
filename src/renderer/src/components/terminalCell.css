@@ -217,6 +217,8 @@
 }
 
 .terminal-cell .cell-head .status-text > .label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* The running time of the turn ("pracuje 3:12"): the label ellipsizes first, a narrow card drops the time (below). */
+.terminal-cell .cell-head .status-text > .turn-time { flex: none; margin-left: -2px; font-variant-numeric: tabular-nums; opacity: .8; }
 
 .terminal-cell .cell-head .muted-mark { flex: none; display: inline-flex; color: var(--text-2); opacity: .8; }
 
@@ -264,6 +266,7 @@
 }
 
 @container (max-width: 300px) {
+  .terminal-cell .cell-head .status-text > .turn-time { display: none; }
   .terminal-cell .cell-head .actions .maximize,
   .terminal-cell .cell-head .actions .mcp-control { display: none; }
   .terminal-cell .cell-head .idx { display: none; }

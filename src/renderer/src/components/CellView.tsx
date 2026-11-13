@@ -7,6 +7,9 @@ import { memo, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { propsEqualWithStyle } from '../../../shared/renderEquality';
 import { errorPhrase, failureLabel } from '../../../shared/alerts';
 import { failedExit, statusText } from '../../../shared/statusDetail';
+import { turnDuration, turnTook } from '../../../shared/turnTimer';
+import { useTurns } from '../turnTimer';
+import { TurnTime } from './TurnTime';
 import { cellDrawColor, getProfile, PROJECT_COLORS, updateCell } from '../../../shared/state';
 import { missingCardCli } from '../../../shared/cliStatus';
 import { cellShell, genericProfileName, shownProfileName } from '../../../shared/profiles';
@@ -66,6 +69,10 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
   // The short reason of the status ("czeka na zgodę: Bash", "praca: Edit", "kod wyjścia 1"), see shared/statusDetail.ts.
   const statusDetail = useStore((st) => st.ui.statusDetails[cell.id]);
   const statusLabel = statusText(status, failure !== undefined ? 'error' : undefined, statusDetail, failure);
+  // The turn timer (agent cells only): the running time beside "pracuje", the length of the last turn in the status tooltip.
+  const timed = profile.cli !== 'shell' && !cell.ssh;
+  const took = useTurns((st) => (timed ? turnTook(st.marks[cell.id]) : undefined));
+  const tookLine = took === undefined ? '' : `\n${tr('skończył po {time}', { time: tr(turnDuration(took).key, turnDuration(took).params) })}`;
   const focused = useStore((st) => st.ui.focusedCellId === cell.id);
   const mcpInfo = useStore((st) => st.ui.mcpInfo);
   const error = useStore((st) => st.ui.cellErrors[cell.id]);
@@ -324,8 +331,8 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
         {phaseLabel
           ? <span className="status-text ssh">{tr(phaseLabel.key, phaseLabel.params)}</span>
           : status === 'waiting' && failure !== undefined
-          ? <span className="status-text error" title={tr(errorPhrase(failure))}><StatusMark kind="error" /><span className="label">{tr(failureLabel(failure))}</span></span>
-          : statusLabel && <span className={`status-text ${status} ${markKind}${exitFailed ? ' error' : ''}`} title={tr(statusLabel.key, statusLabel.params)}><StatusMark kind={markKind} /><span className="label">{tr(statusLabel.key, statusLabel.params)}</span></span>}
+          ? <span className="status-text error" title={`${tr(errorPhrase(failure))}${tookLine}`}><StatusMark kind="error" /><span className="label">{tr(failureLabel(failure))}</span></span>
+          : statusLabel && <span className={`status-text ${status} ${markKind}${exitFailed ? ' error' : ''}`} title={`${tr(statusLabel.key, statusLabel.params)}${tookLine}`}><StatusMark kind={markKind} /><span className="label">{tr(statusLabel.key, statusLabel.params)}</span>{timed && <TurnTime cellId={cell.id} />}</span>}
         <span className="actions">
           {profile.cli !== 'shell' && !ssh && <button className={`mcp-control ${cell.role ?? 'disabled'} ${mcpInfo.connectedCellIds?.includes(cell.id) ? 'connected' : ''}`}
             aria-label={`${tr('Rola / MCP')}: ${tr(cell.role === 'coordinator' ? 'Koordynator' : cell.role === 'worker' ? 'Wykonawca' : 'Bez MCP')}`}
