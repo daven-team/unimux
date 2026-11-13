@@ -7,12 +7,25 @@
 .monitor-cell { margin-bottom: 6px; border-radius: 6px; background: var(--bg-2); padding: 2px 0 4px; }
 .monitor-cell-head, .monitor-row { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 42px 54px; align-items: center; gap: 4px; padding-right: 6px; }
 .monitor-cell-head { min-height: 34px; }
-.monitor-name { min-width: 0; display: flex; flex-direction: column; padding-left: 8px; }
+.monitor-name { min-width: 0; display: flex; flex-direction: column; text-align: left; }
+/* A cell block or the app section folds to its header: the chevron and the name are one button, the chevron turns like
+   .folder-chevron. A folded block keeps its live CPU and memory totals in the header. */
+.monitor-toggle { min-width: 0; align-self: stretch; display: flex; align-items: center; gap: 4px; padding: 0 0 0 4px; border: 0; background: transparent; color: inherit; font-family: inherit; font-size: inherit; cursor: pointer; }
+.monitor-toggle:focus-visible { outline: 1px solid var(--btn-primary-bg); outline-offset: -1px; border-radius: 4px; }
+.monitor-chevron { flex: none; display: grid; place-items: center; width: 12px; color: var(--muted); transition: transform .12s; }
+.monitor-cell.collapsed .monitor-chevron, .monitor-section-head.collapsed .monitor-chevron { transform: rotate(-90deg); }
+@media (prefers-reduced-motion: reduce) { .monitor-chevron { transition: none; } }
+.monitor-cell.collapsed { padding-bottom: 2px; }
+.monitor-section-head { display: grid; grid-template-columns: minmax(0, 1fr) 42px 54px; align-items: center; gap: 4px; padding-right: 6px; margin-top: 6px; border-radius: 4px; }
+.monitor-section-head:hover { background: var(--bg-hover); }
+.monitor-section-head .monitor-section { padding: 5px 4px; font-size: 10.5px; font-weight: 600; }
+.monitor-section-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .monitor-cell-label { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .monitor-project { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .monitor-row { height: 22px; border-radius: 4px; color: var(--text-2); }
 .monitor-row:hover, .monitor-cell-head:hover { background: var(--bg-hover); }
-.monitor-row.app .monitor-proc { padding-left: 8px; }
+/* Not a bare ".app" class: the global .app rule (the window grid, height 100%) made these rows and their hover taller. */
+.monitor-app-row .monitor-proc { padding-left: 8px; }
 .monitor-proc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .monitor-cpu, .monitor-mem { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--text-2); }
 .monitor-mem { color: var(--muted); }

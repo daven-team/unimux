@@ -1,7 +1,8 @@
 // The Monitor panel (1.0.6): what loads the computer. Every 2 s while the panel is mounted and the window visible, main takes one
 // process snapshot; the app's own processes and each running cell's process tree (shell, agent, their children, the console
 // host) are listed with CPU and memory, busiest first. A cell can be shown or restarted; a process of a cell's tree can be ended.
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type MouseEvent } from 'react';
+import { create } from 'zustand';
 import { cellLabel } from '../../../shared/agentWork';
 import { formatBytes, formatCpu, MONITOR_INTERVAL_MS, type MonitorAppRow, type MonitorCell, type MonitorRow, type MonitorSample } from '../../../shared/monitor';
 import { findCell, getProfile } from '../../../shared/state';
@@ -9,7 +10,8 @@ import { cellShell, shownProfileName } from '../../../shared/profiles';
 import { focusCell, restartCell } from '../actions';
 import { useI18n } from '../i18n';
 import { askChoice, toast, useStore } from '../store';
-import { IRestart, IView, IX } from './icons';
+import { openMenu } from './ContextMenu';
+import { IChevron, IRestart, IView, IX } from './icons';
 import { PanelEmpty } from './PanelEmpty';
 import './monitorPanel.css';
 
@@ -44,6 +46,17 @@ function useMonitorSample(): { sample: MonitorSample | null; failed: boolean; re
   return { sample, failed, refresh: () => setNonce((n) => n + 1) };
 }
 
+/** The id of the app section in the collapsed set (cell ids never start with a colon, so it cannot clash). */
+const APP_SECTION = ':app';
+
+/** Folded cell blocks and the app section, kept for the session (the panel unmounts when hidden, the set stays). */
+const useCollapsed = create<{ ids: ReadonlySet<string> }>(() => ({ ids: new Set<string>() }));
+function toggleCollapsed(id: string): void {
+  const ids = new Set(useCollapsed.getState().ids);
+  if (ids.has(id)) ids.delete(id); else ids.add(id);
+  useCollapsed.setState({ ids });
+}
+
 function Usage({ cpu, mem }: { cpu: number; mem: number }) {
   return (
     <>
@@ -58,6 +71,7 @@ export function MonitorPanel() {
   const { sample, failed, refresh } = useMonitorSample();
   const s = useStore((st) => st.s);
   const sessionTitles = useStore((st) => st.ui.sessionTitles);
+  const collapsed = useCollapsed((st) => st.ids);
 
   const appLabel = (row: MonitorAppRow): string => {
     switch (row.kind) {
@@ -100,8 +114,22 @@ export function MonitorPanel() {
     );
   }
   const cells = sample.cells.flatMap((cell) => { const info = cellInfo(cell.cellId); return info ? [{ cell, info }] : []; });
+  const appCpu = sample.app.reduce((sum, row) => sum + row.cpu, 0);
+  const appMem = sample.app.reduce((sum, row) => sum + row.mem, 0);
+  const appCollapsed = collapsed.has(APP_SECTION);
+  const allIds = [...cells.map(({ cell }) => cell.cellId), APP_SECTION];
+  const onMenu = (e: MouseEvent) => {
+    // Process rows and the row buttons keep the native behaviour; the menu belongs to the background and the block headers.
+    if ((e.target as HTMLElement).closest('.monitor-row, .monitor-actions')) return;
+    e.preventDefault();
+    openMenu(e.clientX, e.clientY, [
+      { label: tr('Zwiń wszystkie'), disabled: allIds.every((id) => collapsed.has(id)), onClick: () => useCollapsed.setState({ ids: new Set([...collapsed, ...allIds]) }) },
+      { label: tr('Rozwiń wszystkie'), disabled: !allIds.some((id) => collapsed.has(id)), onClick: () => useCollapsed.setState({ ids: new Set<string>() }) },
+    ]);
+  };
+  const toggleTitle = (folded: boolean) => (folded ? tr('Rozwiń') : tr('Zwiń'));
   return (
-    <div className="monitor">
+    <div className="monitor" onContextMenu={onMenu}>
       <div className="monitor-total" title={tr('Odświeżane co 2 s, gdy panel jest otwarty. 100% to cały procesor ({cores} rdzeni logicznych).', { cores: sample.cores })}>
         {tr('Razem: {cpu} CPU, {mem}', { cpu: formatCpu(sample.cpu), mem: formatBytes(sample.mem) })}
         {failed && <span className="monitor-stale"> · {tr('Nie udało się odczytać procesów.')}</span>}
@@ -109,20 +137,23 @@ export function MonitorPanel() {
       <div className="monitor-scroll">
         <div className="monitor-section">{tr('Komórki')}</div>
         {!cells.length && <PanelEmpty><p>{tr('Żadna komórka nie jest uruchomiona.')}</p></PanelEmpty>}
-        {cells.map(({ cell, info }) => (
-          <div key={cell.cellId} className="monitor-cell" data-cell={cell.cellId}>
+        {cells.map(({ cell, info }) => { const folded = collapsed.has(cell.cellId); return (
+          <div key={cell.cellId} className={`monitor-cell ${folded ? 'collapsed' : ''}`} data-cell={cell.cellId}>
             <div className="monitor-cell-head">
-              <div className="monitor-name">
-                <span className="monitor-cell-label" title={info.label}>{info.label}</span>
-                <span className="monitor-project" title={info.project}>{info.project}</span>
-              </div>
+              <button type="button" className="monitor-toggle" aria-expanded={!folded} title={toggleTitle(folded)} onClick={() => toggleCollapsed(cell.cellId)}>
+                <span className="monitor-chevron"><IChevron /></span>
+                <span className="monitor-name">
+                  <span className="monitor-cell-label" title={info.label}>{info.label}</span>
+                  <span className="monitor-project" title={info.project}>{info.project}</span>
+                </span>
+              </button>
               <Usage cpu={cell.cpu} mem={cell.mem} />
               <span className="monitor-actions">
                 <button type="button" title={tr('Pokaż komórkę')} aria-label={tr('Pokaż komórkę')} onClick={() => focusCell(cell.cellId)}><IView /></button>
                 <button type="button" title={tr('Uruchom ponownie')} aria-label={tr('Uruchom ponownie')} onClick={() => { restartCell(cell.cellId, info.session ? 'resume' : 'new'); refresh(); }}><IRestart /></button>
               </span>
             </div>
-            {cell.rows.map((row) => (
+            {!folded && cell.rows.map((row) => (
               <div key={row.pid} className="monitor-row" title={`${row.name} · PID ${row.pid}`}>
                 <span className="monitor-proc" style={{ paddingLeft: 8 + row.depth * 10 }}>{row.name}</span>
                 <Usage cpu={row.cpu} mem={row.mem} />
@@ -134,10 +165,16 @@ export function MonitorPanel() {
               </div>
             ))}
           </div>
-        ))}
-        <div className="monitor-section">{tr('Aplikacja')}</div>
-        {sample.app.map((row) => (
-          <div key={row.pid} className="monitor-row app" title={`${row.name} · PID ${row.pid}`}>
+        ); })}
+        <div className={`monitor-section-head ${appCollapsed ? 'collapsed' : ''}`}>
+          <button type="button" className="monitor-toggle monitor-section" aria-expanded={!appCollapsed} title={toggleTitle(appCollapsed)} onClick={() => toggleCollapsed(APP_SECTION)}>
+            <span className="monitor-chevron"><IChevron /></span>
+            <span className="monitor-section-label">{tr('Aplikacja')}</span>
+          </button>
+          {appCollapsed && <Usage cpu={appCpu} mem={appMem} />}
+        </div>
+        {!appCollapsed && sample.app.map((row) => (
+          <div key={row.pid} className="monitor-row monitor-app-row" title={`${row.name} · PID ${row.pid}`}>
             <span className="monitor-proc">{appLabel(row)}</span>
             <Usage cpu={row.cpu} mem={row.mem} />
             <span className="monitor-actions" />

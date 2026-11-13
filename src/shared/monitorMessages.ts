@@ -3,6 +3,11 @@
 export const monitorMessages = {
   'Monitor': ['Monitor', 'Monitor', 'Monitor', 'Moniteur', 'Monitor'],
   'CPU': ['CPU', 'CPU', 'CPU', 'CPU', 'CPU'],
+  // Folding a cell block or the app section to its header row, one by one or from the panel's context menu.
+  'Zwiń': ['Collapse', 'Einklappen', 'Contraer', 'Réduire', 'Recolher'],
+  'Rozwiń': ['Expand', 'Ausklappen', 'Expandir', 'Développer', 'Expandir'],
+  'Zwiń wszystkie': ['Collapse all', 'Alle einklappen', 'Contraer todo', 'Tout réduire', 'Recolher tudo'],
+  'Rozwiń wszystkie': ['Expand all', 'Alle ausklappen', 'Expandir todo', 'Tout développer', 'Expandir tudo'],
   'Aplikacja': ['App', 'App', 'Aplicación', 'Application', 'Aplicação'],
   'Proces główny': ['Main process', 'Hauptprozess', 'Proceso principal', 'Processus principal', 'Processo principal'],
   'Okno aplikacji': ['App window', 'App-Fenster', 'Ventana de la aplicación', 'Fenêtre de l’application', 'Janela da aplicação'],
