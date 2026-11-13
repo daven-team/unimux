@@ -93,6 +93,8 @@ export interface McApi {
   /** The answer to 'app:confirm-quit': 'asking' at once (the dialog is open), then 'quit' or 'cancel'. */
   answerQuit(answer: 'asking' | 'quit' | 'cancel'): void;
   pickFolder(): Promise<string | null>;
+  /** Native open dialog for any file (File > Open file); null when cancelled. */
+  openFileDialog(): Promise<string | null>;
   /** Native dialog for an own alert sound; null when cancelled. */
   pickSoundFile(): Promise<string | null>;
   /** Bytes of the saved own sound of an alert event (main reads the path from settings); `data` is null when `knownKey` is still current. */
@@ -232,6 +234,10 @@ export interface McApi {
     toggleMaximize(): void;
     close(): void;
     isMaximized(): Promise<boolean>;
+    /** Full screen on or off (View menu). */
+    toggleFullscreen(): void;
+    /** The zoom of the whole page (View menu), 1 = 100 percent; main keeps it within 50-300 percent. */
+    setZoom(factor: number): void;
     /**
      * Where the page draws the buttons, in client pixels (null: none), and their accessible names (through tr()). The native
      * side lays its hit-test windows out itself; the rects are its cross-check, the names its window text.

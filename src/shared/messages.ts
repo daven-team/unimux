@@ -58,7 +58,9 @@ import { usageMessages } from './usageMessages';
 import { uxMessages } from './uxMessages';
 import { waitingMessages } from './waitingMessages';
 import { teamPanelMessages } from './teamPanelMessages';
+import { menuBarMessages } from './menuBarMessages';
 export const messages = {
+  ...menuBarMessages,
   ...accountSwitchMessages,
   ...agentModeMessages,
   ...agentWorkMessages,

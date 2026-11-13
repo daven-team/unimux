@@ -14,6 +14,11 @@ use unimux_ipc::RouterBuilder;
 use crate::caption::{self, Button};
 use crate::context::AppContext;
 
+/// The page zoom asked for by `window:setZoom`: a finite factor, kept within 50-300 percent.
+fn page_zoom(value: &Value) -> Option<f64> {
+    value.as_f64().filter(|f| f.is_finite() && *f > 0.0).map(|f| f.clamp(0.5, 3.0))
+}
+
 /// The caller's own window (a page only ever drives the window it is in).
 fn window_of(ctx: &AppContext, label: &str) -> Option<WebviewWindow> {
     ctx.app().and_then(|a| a.get_webview_window(label))
@@ -148,6 +153,29 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
         }
     });
 
+    // The View menu of the title bar: full screen on and off, and the zoom of the whole page (the renderer keeps the level).
+    let c = ctx.clone();
+    r.send("window:toggleFullscreen", move |call| {
+        let c = c.clone();
+        async move {
+            if let Some(w) = window_of(&c, &call.caller.label) {
+                let on = w.is_fullscreen().unwrap_or(false);
+                let _ = w.set_fullscreen(!on);
+            }
+        }
+    });
+
+    let c = ctx.clone();
+    r.send("window:setZoom", move |call| {
+        let c = c.clone();
+        async move {
+            let Some(factor) = page_zoom(call.arg(0)) else { return };
+            if let Some(w) = window_of(&c, &call.caller.label) {
+                let _ = w.set_zoom(factor);
+            }
+        }
+    });
+
     // The page's button rects (a cross-check of the native layout in caption.rs) and the buttons' accessible names.
     let c = ctx.clone();
     r.send("window:captionArea", move |call| {
@@ -158,4 +186,20 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::page_zoom;
+    use serde_json::json;
+
+    #[test]
+    fn page_zoom_is_a_bounded_factor() {
+        assert_eq!(page_zoom(&json!(1.25)), Some(1.25));
+        assert_eq!(page_zoom(&json!(10)), Some(3.0));
+        assert_eq!(page_zoom(&json!(0.1)), Some(0.5));
+        assert_eq!(page_zoom(&json!(0)), None);
+        assert_eq!(page_zoom(&json!("2")), None);
+        assert_eq!(page_zoom(&json!(null)), None);
+    }
 }

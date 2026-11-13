@@ -76,6 +76,7 @@ export const CHANNEL_KINDS: Readonly<Record<string, 'invoke' | 'send'>> = {
   "detach:waits": "invoke",
   "detach:work": "send",
   "detach:works": "invoke",
+  "dialog:openFile": "invoke",
   "dialog:pickFolder": "invoke",
   "fs:cancelOp": "send",
   "fs:createEntry": "invoke",
@@ -132,6 +133,7 @@ export const CHANNEL_KINDS: Readonly<Record<string, 'invoke' | 'send'>> = {
   "local:rename": "invoke",
   "local:reveal": "invoke",
   "local:roots": "invoke",
+  "local:saveAs": "invoke",
   "local:statFile": "invoke",
   "local:trash": "invoke",
   "local:writeFile": "invoke",
@@ -219,6 +221,8 @@ export const CHANNEL_KINDS: Readonly<Record<string, 'invoke' | 'send'>> = {
   "window:close": "send",
   "window:isMaximized": "invoke",
   "window:minimize": "send",
+  "window:setZoom": "send",
+  "window:toggleFullscreen": "send",
   "window:toggleMaximize": "send"
 };
 /** Positions of the arguments an event callback declares optional: a null from Rust becomes undefined there. */

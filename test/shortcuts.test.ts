@@ -207,7 +207,8 @@ describe('conflicts', () => {
   });
   it('is not a conflict between the file tree and the editor, nor with a disabled action', () => {
     expect(checkAssignment('editor.save', combo('Ctrl+C'), win({}), 'win32')).toMatchObject({ ok: false, kind: 'reserved' });
-    expect(checkAssignment('editor.save', combo('Ctrl+Shift+S'), win({}), 'win32')).toEqual({ ok: true, same: false });
+    expect(checkAssignment('editor.save', combo('Ctrl+Shift+F12'), win({}), 'win32')).toEqual({ ok: true, same: false });
+    expect(checkAssignment('editor.save', combo('Ctrl+Shift+S'), win({}), 'win32')).toMatchObject({ ok: false });
     expect(checkAssignment('tree.copy', combo('Ctrl+S'), win({}), 'win32')).toEqual({ ok: true, same: false });
     expect(checkAssignment('grid.new', combo('Ctrl+Shift+T'), win({ 'terminal.new': null }), 'win32')).toEqual({ ok: true, same: false });
   });
@@ -394,6 +395,8 @@ describe('the default map reproduces the old behaviour', () => {
     if (ctrlShift && e.code === 'KeyE') return 'sidebar.toggle';
     // Added after the old handler: a new project folder.
     if (ctrlShift && e.code === 'KeyK') return 'folder.new';
+    // Added after the old handler: a new untitled text tab (the context has the keyboard elsewhere than a terminal).
+    if (ctrl && !e.shiftKey && e.code === 'KeyN') return 'file.new';
     // 1.0.0: Settings is a tab of the strip, so Mod+Tab also leaves it (it used to be blocked there).
     if (e.code === 'Tab' && (platform === 'darwin' ? e.ctrlKey && !e.metaKey && !e.altKey : ctrl)) return e.shiftKey ? 'tab.prev' : 'tab.next';
     if (settingsActive) return null;

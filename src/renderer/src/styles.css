@@ -15,7 +15,8 @@
   --working: #f5b942;
   --waiting: #4ade80;
   --error: #f87171;
-  --titlebar: 36px;
+  /* Never lower than the native caption buttons (36 DIP) when the page is zoomed out (uiZoom.ts). */
+  --titlebar: max(36px, calc(36px / var(--ui-zoom, 1)));
   /* Height of a grid cell's header; drop overlays and cell cards start right below it (cellBodyBox measures the real header; keep CELL_HEAD_HEIGHT in shared/cellBox.ts equal). */
   --cell-head: 34px;
   /* 1.0.7 cell cards: a card on the slightly darker grid; a local terminal draws on --card-bg (CARD_BG in TerminalManager.ts). */
@@ -92,20 +93,30 @@ button, input, select, textarea { font: inherit; color: inherit; }
 @media (prefers-reduced-motion: reduce) { .automation-splitter::after { transition: none; } }
 
 .titlebar {
-  display: flex; align-items: center; gap: 8px; padding: 0 140px 0 0;
+  display: flex; align-items: center; gap: 8px; padding: 0 calc(140px / var(--ui-zoom, 1)) 0 0;
   border-bottom: 1px solid var(--border); background: var(--bg); -webkit-app-region: drag; user-select: none;
 }
-.titlebar .brand { width: var(--sidebar-width, 228px); flex: none; display: flex; align-items: center; gap: 8px; padding-left: 14px; font-weight: 600; letter-spacing: .2px; color: #e5e5e5; }
-.titlebar .brand.collapsed { width: 48px; }
+/* The logo sits over the sidebar; the menu bar follows it. The brand keeps the sidebar width (the strip starts where the
+   sidebar ends) and grows only when the menu bar needs more, as over the collapsed rail. */
+.titlebar .brand { width: var(--sidebar-width, 228px); min-width: max-content; flex: none; display: flex; align-items: center; gap: 6px; padding-left: 14px; font-weight: 600; letter-spacing: .2px; color: #e5e5e5; }
+.titlebar .brand.collapsed { width: auto; min-width: 48px; }
 html[data-platform="darwin"] .titlebar { padding-right: 8px; }
-html[data-platform="darwin"] .titlebar .brand { padding-left: 84px; }
-html[data-platform="darwin"] .titlebar .brand.collapsed { width: 112px; }
-html[data-platform="darwin"] .first-run-titlebar { padding-left: 84px; }
+html[data-platform="darwin"] .titlebar .brand { padding-left: calc(84px / var(--ui-zoom, 1)); }
+html[data-platform="darwin"] .titlebar .brand.collapsed { width: auto; min-width: 112px; }
+html[data-platform="darwin"] .first-run-titlebar { padding-left: calc(84px / var(--ui-zoom, 1)); }
 .brand-logo { width: 14px; height: 14px; border-radius: 4px; background: linear-gradient(135deg, #3b82f6, #a855f7); flex: none; }
 .titlebar .no-drag, .titlebar button, .titlebar .tab { -webkit-app-region: no-drag; }
+/* The menu bar (MenuBar.tsx): plain titles that light up while hovered or open. */
+.menubar { display: flex; align-items: center; gap: 1px; margin-left: 4px; }
+.menubar-item {
+  height: 26px; padding: 0 8px; border: 0; border-radius: var(--btn-radius); background: transparent; color: #a3a3a3;
+  font: inherit; font-size: 12.5px; font-weight: 400; letter-spacing: 0; cursor: default; transition: background .12s, color .12s;
+}
+.menubar-item:hover, .menubar-item.open { background: var(--btn-ghost-hover); color: #f2f2f2; }
+.menubar-item:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 /* 1.2.0 (Tauri on Windows, W1): the caption buttons, drawn on a strip above everything like 1.1.4's native overlay; the
    pointer goes to the native hit-test window over them, never to the page (CaptionButtons.tsx). */
-.mc-caption { position: fixed; left: 0; right: 0; top: 0; width: 100%; height: 40px; pointer-events: none; z-index: 2147483647; }
+.mc-caption { position: fixed; left: 0; right: 0; top: 0; width: 100%; height: calc(40px / var(--ui-zoom, 1)); pointer-events: none; z-index: 2147483647; }
 .mc-caption-tip { position: fixed; pointer-events: none; z-index: 2147483646; }
 
 /* The border stays (transparent) so the variants that colour it (dashed "add" buttons, toggles) keep their size. Hover rules
@@ -398,39 +409,20 @@ html[data-platform="darwin"] .first-run-titlebar { padding-left: 84px; }
 .side-section .side-title { padding: 0 2px 6px 6px; }
 /* 1.0.7: the right panels' titles sit on the same line as the left panel's title (.side-panel-title), the actions at the right edge. */
 .rpanel .side-title { min-height: 31px; padding: 5px var(--space-3) 2px 14px; }
-.brand-name { font-weight: 600; letter-spacing: .1px; color: #ececec; }
 
-/* ── brand: white wordmark with random color moments ──────────────────── */
+/* ── brand: the logo with random color moments ───────────────────────── */
 .brand { position: relative; --fx: #60a5fa; }
 .brand-mark { display: grid; place-items: center; transition: filter .8s ease, transform .8s cubic-bezier(.2,.9,.3,1.4); }
 .brand.fx .brand-mark { filter: drop-shadow(0 0 7px var(--fx)); transform: scale(1.08) rotate(-4deg); }
-.brand-name { position: relative; display: inline-block; font-weight: 700; font-size: 13.5px; letter-spacing: .2px; }
-.bn-base { color: #ededed; transition: opacity .8s ease; }
-.bn-fx {
-  position: absolute; inset: 0; opacity: 0; transition: opacity .8s ease;
-  color: transparent; -webkit-background-clip: text; background-clip: text;
-  background-size: 300% 100%; background-image: linear-gradient(90deg, var(--fx), var(--fx));
-  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--fx) 55%, transparent));
-}
-.brand.fx .bn-base { opacity: 0; }
-.brand.fx .bn-fx { opacity: 1; animation: bn-flow 2.4s linear infinite; }
-@keyframes bn-flow { to { background-position: 300% 0; } }
 .brand.t-blue { --fx: #60a5fa; }
 .brand.t-red { --fx: #f87171; }
 .brand.t-green { --fx: #4ade80; }
 .brand.t-amber { --fx: #fbbf24; }
 .brand.t-violet { --fx: #a78bfa; }
 .brand.t-sunset { --fx: #fb923c; }
-.brand.t-sunset .bn-fx { background-image: linear-gradient(90deg, #fb923c, #f472b6, #facc15, #fb923c); }
 .brand.t-ocean { --fx: #22d3ee; }
-.brand.t-ocean .bn-fx { background-image: linear-gradient(90deg, #22d3ee, #3b82f6, #818cf8, #22d3ee); }
 .brand.t-aurora { --fx: #34d399; }
-.brand.t-aurora .bn-fx { background-image: linear-gradient(90deg, #34d399, #22d3ee, #a78bfa, #34d399); }
 .brand.t-rainbow { --fx: #f472b6; }
-.brand.t-rainbow .bn-fx { background-image: linear-gradient(90deg, #f87171, #fbbf24, #4ade80, #22d3ee, #60a5fa, #a78bfa, #f472b6, #f87171); }
-@media (prefers-reduced-motion: reduce) {
-  .brand.fx .bn-fx { animation: none; }
-}
 
 /* ── cell names (the header itself: terminalCell.css) ─────────────────────── */
 .cell-name-input { flex: 1; min-width: 0; width: 180px; height: 20px; background: var(--bg); border: 1px solid var(--accent); border-radius: 4px; padding: 0 5px; outline: none; font-size: 11.5px; }

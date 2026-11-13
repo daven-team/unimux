@@ -158,6 +158,8 @@ export interface ShortcutDef {
   aliases?: readonly string[];
   /** Fires only while the keyboard is in a terminal (the terminal's find): elsewhere the key stays with the focused field. */
   terminalOnly?: boolean;
+  /** With Ctrl held and the keyboard in a terminal the key stays with the program there (Ctrl+N of a shell or an agent). */
+  notInTerminal?: boolean;
   /** Why a read-only row cannot be changed. */
   reason?: MessageKey;
   /** Read-only row that is not a key press at all (Ctrl+wheel); `Mod` as above. */
@@ -216,7 +218,10 @@ export const SHORTCUTS = [
   { id: 'folder.new', label: 'Nowy folder projektów', group: 'panels', scope: 'global', default: 'Mod+Shift+K', rebindable: true },
   { id: 'sidebar.toggle', label: 'Pokaż lub ukryj panel boczny', group: 'panels', scope: 'global', default: 'Mod+Shift+E', rebindable: true },
   { id: 'git.commit', label: 'Git: zatwierdź zmiany (commit)', group: 'panels', scope: 'git-panel', default: 'Mod+Enter', rebindable: true, aliases: ['Ctrl+Enter'] },
+  // An untitled editor tab (File menu of the title bar). Ctrl+N with the keyboard in a terminal stays with the program there.
+  { id: 'file.new', label: 'Nowy plik tekstowy', group: 'files', scope: 'global', default: 'Mod+N', rebindable: true, notInTerminal: true },
   { id: 'editor.save', label: 'Zapisz plik w edytorze', group: 'files', scope: 'editor', default: 'Mod+S', rebindable: true },
+  { id: 'editor.saveAs', label: 'Zapisz plik jako', group: 'files', scope: 'editor', default: 'Mod+Shift+S', rebindable: true },
   { id: 'tree.rename', label: 'Drzewo plików: zmień nazwę', group: 'files', scope: 'files-tree', default: 'F2', rebindable: true },
   { id: 'tree.delete', label: 'Drzewo plików: przenieś do kosza', group: 'files', scope: 'files-tree', default: 'Delete', rebindable: true },
   { id: 'tree.copy', label: 'Drzewo plików: kopiuj', group: 'files', scope: 'files-tree', default: 'Mod+C', rebindable: true, aliases: ['Ctrl+C'] },

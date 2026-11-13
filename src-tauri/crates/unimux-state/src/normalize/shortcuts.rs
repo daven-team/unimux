@@ -29,7 +29,7 @@ const fn def(id: &'static str, scope: Scope, default: Option<&'static str>, rebi
 }
 
 use Scope::*;
-const DEFS: [Def; 55] = [
+const DEFS: [Def; 57] = [
     def("palette.open", Global, Some("Mod+K"), true),
     def("palette.openAlt", Global, Some("Mod+Shift+P"), true),
     def("modal.save", Modal, Some("Mod+Enter"), true),
@@ -72,7 +72,9 @@ const DEFS: [Def; 55] = [
     def("folder.new", Global, Some("Mod+Shift+K"), true),
     def("sidebar.toggle", Global, Some("Mod+Shift+E"), true),
     def("git.commit", GitPanel, Some("Mod+Enter"), true),
+    def("file.new", Global, Some("Mod+N"), true),
     def("editor.save", Editor, Some("Mod+S"), true),
+    def("editor.saveAs", Editor, Some("Mod+Shift+S"), true),
     def("tree.rename", FilesTree, Some("F2"), true),
     def("tree.delete", FilesTree, Some("Delete"), true),
     def("tree.copy", FilesTree, Some("Mod+C"), true),

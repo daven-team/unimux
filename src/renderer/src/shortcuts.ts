@@ -14,6 +14,7 @@ import { openQueue } from './promptQueue';
 import { openAgentPrompt } from './agentPrompt';
 import { stepToWaiting } from './waiting';
 import { stepTabSwitch } from './tabSwitcher';
+import { newUntitledFile } from './files';
 
 let cached: { overrides: unknown; platform: string; resolution: ShortcutResolution } | null = null;
 
@@ -67,7 +68,11 @@ function focusTarget(target: EventTarget | null): 'terminal' | 'input' | 'other'
   return 'other';
 }
 
-function run(id: string, e: KeyboardEvent): void {
+/**
+ * Runs the app action `id` as its shortcut would (also for the title bar menu). `e`: the key press, which only the recently
+ * used tabs (tab.next / tab.prev) need to see the held modifier; without it they step once.
+ */
+export function runShortcut(id: string, e?: KeyboardEvent): void {
   const project = activeProject(getS());
   switch (id) {
     case 'palette.open': case 'palette.openAlt': setUi((ui) => ({ palette: !ui.palette })); break;
@@ -82,14 +87,15 @@ function run(id: string, e: KeyboardEvent): void {
     case 'notes.toggle': update((s) => ({ ...s, notesOpen: !s.notesOpen })); break;
     case 'notes.capture': captureSelectionToNote(); break;
     case 'folder.new': void createProjectFolder(); break;
+    case 'file.new': newUntitledFile(); break;
     case 'sidebar.toggle': update((s) => ({ ...s, sidebarCollapsed: !s.sidebarCollapsed })); break;
     case 'cell.maximize': toggleMaximize(); break;
     case 'cell.queue': openQueue(); break;
     case 'agents.prompt': openAgentPrompt(); break;
     case 'terminal.find': { const cell = focusedTerminalCell(); if (cell) openTerminalFind(cell); break; }
     // 1.1.1: recently used tabs (hold the modifier to walk further); the strip order has its own, unbound actions.
-    case 'tab.next': stepTabSwitch(1, e); break;
-    case 'tab.prev': stepTabSwitch(-1, e); break;
+    case 'tab.next': if (e) stepTabSwitch(1, e); else cycleWorkspace(1); break;
+    case 'tab.prev': if (e) stepTabSwitch(-1, e); else cycleWorkspace(-1); break;
     case 'tab.right': cycleWorkspace(1); break;
     case 'tab.left': cycleWorkspace(-1); break;
     case 'cell.focus.left': moveFocus(-1, 0); break;
@@ -127,7 +133,7 @@ export function useShortcuts(only?: ReadonlySet<string>): void {
       if (!id || (only && !only.has(id))) return;
       e.preventDefault();
       e.stopPropagation();
-      run(id, e);
+      runShortcut(id, e);
     };
     const onUp = (e: KeyboardEvent) => repeats.release(e);
     window.addEventListener('keydown', onKey, true);

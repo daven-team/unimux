@@ -8,6 +8,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useI18n } from '../i18n';
 import { readCaptionPointer, type CaptionPointer } from '../../../shared/caption';
+import { uiZoom } from '../uiZoom';
 import { captionHitRects, captionLayout, fadeTo, fadeValue, paintCaption, type CaptionButton, type CaptionLayout, type Fade } from '../captionPaint';
 
 const BUTTONS: readonly CaptionButton[] = ['min', 'max', 'close'];
@@ -25,7 +26,7 @@ export function CaptionButtons() {
 }
 
 /** The client width in device pixels (what the layout is computed from), the canvas size in device pixels, the scale. */
-interface Size { clientWidth: number; canvasWidth: number; height: number; scale: number }
+interface Size { clientWidth: number; canvasWidth: number; height: number; scale: number; cssScale: number }
 
 function CaptionLayer() {
   const { tr } = useI18n();
@@ -46,18 +47,29 @@ function CaptionLayer() {
     if (!el) return;
     const measure = (entry?: ResizeObserverEntry) => {
       const box = entry?.devicePixelContentBoxSize?.[0];
-      const scale = window.devicePixelRatio || 1;
-      const canvasWidth = box ? box.inlineSize : Math.round(el.getBoundingClientRect().width * scale);
+      // The page zoom (View menu, uiZoom.ts) scales devicePixelRatio, never the native buttons: the layout keeps the DIP scale.
+      const cssScale = window.devicePixelRatio || 1;
+      const scale = cssScale / uiZoom();
+      const canvasWidth = box ? box.inlineSize : Math.round(el.getBoundingClientRect().width * cssScale);
       // The canvas may cover one pixel more than the client at 125 / 150 percent (its CSS width is snapped): the layout
       // follows the client width, which the fractional viewport width gives exactly.
-      const clientWidth = Math.round((window.visualViewport?.width ?? window.innerWidth) * scale);
+      const clientWidth = Math.round((window.visualViewport?.width ?? window.innerWidth) * cssScale);
       const height = box ? box.blockSize : Math.round(STRIP_HEIGHT * scale);
-      setSize((prev) => (prev && prev.clientWidth === clientWidth && prev.canvasWidth === canvasWidth && prev.height === height && prev.scale === scale ? prev : { clientWidth, canvasWidth, height, scale }));
+      setSize((prev) => (prev && prev.clientWidth === clientWidth && prev.canvasWidth === canvasWidth && prev.height === height && prev.scale === scale && prev.cssScale === cssScale ? prev : { clientWidth, canvasWidth, height, scale, cssScale }));
     };
     measure();
     const observer = new ResizeObserver((entries) => measure(entries[0]));
     try { observer.observe(el, { box: 'device-pixel-content-box' }); } catch { observer.observe(el); }
-    return () => observer.disconnect();
+    // A page zoom changes devicePixelRatio but not the canvas's device pixels (the observer stays quiet): measure again then.
+    let ratio: MediaQueryList | null = null;
+    const onRatio = () => { measure(); watchRatio(); };
+    const watchRatio = () => {
+      ratio?.removeEventListener('change', onRatio);
+      ratio = window.matchMedia?.(`(resolution: ${window.devicePixelRatio || 1}dppx)`) ?? null;
+      ratio?.addEventListener('change', onRatio);
+    };
+    watchRatio();
+    return () => { observer.disconnect(); ratio?.removeEventListener('change', onRatio); };
   }, []);
 
   // Maximized (the restore glyph, the container at the very top) and the pointer from the native child. A listener is
@@ -144,7 +156,7 @@ function CaptionLayer() {
     max: () => window.mc.windowControls.toggleMaximize(),
     close: () => window.mc.windowControls.close(),
   };
-  const scale = size?.scale ?? 1;
+  const scale = size?.cssScale ?? 1;
   return (
     <>
       <canvas ref={canvas} className="mc-caption" aria-hidden="true" />

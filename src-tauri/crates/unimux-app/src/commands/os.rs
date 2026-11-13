@@ -294,7 +294,7 @@ impl OsService {
     }
 
     /// The window a dialog belongs to: the caller's, else main.
-    fn dialog_parent(&self, label: &str) -> Option<WebviewWindow> {
+    pub(crate) fn dialog_parent(&self, label: &str) -> Option<WebviewWindow> {
         let app = self.ctx()?.app()?.clone();
         app.get_webview_window(label).or_else(|| app.get_webview_window(crate::windows::MAIN))
     }
@@ -495,6 +495,18 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
             let Some(ctx) = s.ctx() else { return Ok(Value::Null) };
             let title = translate(&language(&ctx.state.get()), "Wybierz folder projektu", &[]);
             let request = PickRequest { folder: true, title, filter: None, more_filters: Vec::new(), directory: None };
+            Ok(s.desktop.pick(s.dialog_parent(&call.caller.label), request).await.map(Value::String).unwrap_or(Value::Null))
+        }
+    });
+
+    // File > Open file of the title bar menu: any file; the renderer opens it in an editor tab (local:readFile).
+    let s = os.clone();
+    r.invoke("dialog:openFile", move |call| {
+        let s = s.clone();
+        async move {
+            let Some(ctx) = s.ctx() else { return Ok(Value::Null) };
+            let title = translate(&language(&ctx.state.get()), "Otwórz plik", &[]);
+            let request = PickRequest { folder: false, title, filter: None, more_filters: Vec::new(), directory: None };
             Ok(s.desktop.pick(s.dialog_parent(&call.caller.label), request).await.map(Value::String).unwrap_or(Value::Null))
         }
     });
@@ -716,6 +728,7 @@ mod tests {
             "notify:show",
             "attention:flash",
             "dialog:pickFolder",
+            "dialog:openFile",
             "sound:pick",
             "sound:load",
             "sound:beep",

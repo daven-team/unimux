@@ -10,8 +10,10 @@ import './styles.css';
 import './components/statusStyles.css';
 import { watchSpinners } from '../../shared/spinSync';
 import { onWindowShown } from './windowShown';
+import { initUiZoom } from './uiZoom';
 
 installErrorReporting();
+initUiZoom();
 watchSpinners(document, requestAnimationFrame, onWindowShown);
 // The last resort: a render error no inner boundary caught leaves a "reload the window" card, not a blank window.
 // The tooltip host sits beside the app: titles get the styled bubble on the boot and language screens and the fallback too.

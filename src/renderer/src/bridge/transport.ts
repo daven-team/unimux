@@ -95,6 +95,7 @@ export function wellFormed(value: unknown): unknown {
 const MARK_ILL_FORMED_TEXT = new Map<string, { text: number; flag: number }>([
   ['fs:writeProjectFile', { text: 2, flag: 4 }],
   ['local:writeFile', { text: 1, flag: 3 }],
+  ['local:saveAs', { text: 1, flag: 2 }],
 ]);
 
 /** `args` of a save with the ill-formed marker in place (the same array when the text is fine). */

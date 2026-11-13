@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Logo } from './icons';
 import './updater.css';
 
 const THEMES = ['aurora', 'rainbow', 'ocean', 'sunset', 'violet'];
 
-export function Brand({ collapsed }: { collapsed: boolean }) {
+/** The logo of the title bar (a click plays its colour moment); the children follow it (the menu bar). */
+export function Brand({ collapsed, children }: { collapsed: boolean; children?: ReactNode }) {
   const [effect, setEffect] = useState({ theme: 'aurora', run: 0, active: false });
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
@@ -17,10 +18,9 @@ export function Brand({ collapsed }: { collapsed: boolean }) {
     <div className={`brand interactive-brand ${collapsed ? 'collapsed' : ''} ${effect.active ? 'fx' : ''} t-${effect.theme}`}>
       <button className="brand-trigger no-drag" onClick={animate} aria-label="unimux">
         <span className="brand-mark"><Logo size={20} /></span>
-        {!collapsed && <><span className="brand-name"><span className="bn-base">unimux</span><span className="bn-fx" aria-hidden>unimux</span></span>
-          </>}
         {effect.active && <span key={effect.run} className="brand-burst" aria-hidden />}
       </button>
+      {children}
     </div>
   );
 }
