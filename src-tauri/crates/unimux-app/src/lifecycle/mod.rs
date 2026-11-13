@@ -528,7 +528,11 @@ fn relaunch(ctx: &AppContext) {
     drop(ctx.lifecycle.instance.lock().take());
     unimux_platform::instance::wait_released(&ctx.data_dir, Duration::from_secs(2));
     let Ok(exe) = std::env::current_exe() else { return };
-    let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    // Our own arguments without the files this run opened, plus the files a second start asked for during the wind-down.
+    let own: Vec<String> = std::env::args_os().map(|a| a.to_string_lossy().into_owned()).collect();
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let args: Vec<std::ffi::OsString> =
+        crate::open_files::relaunch_args(&own, &cwd, ctx.open_files.take()).into_iter().map(Into::into).collect();
     let program = unimux_exec::Program::Args { program: exe, args };
     let mut env: std::collections::HashMap<std::ffi::OsString, std::ffi::OsString> = std::env::vars_os().collect();
     env.insert(RELAUNCH_AFTER_PID.into(), std::process::id().to_string().into());
@@ -537,12 +541,15 @@ fn relaunch(ctx: &AppContext) {
     }
 }
 
-/// Another start of unimux (or a 1.1.x on the same dir): focus the window, or, while winding down, start again afterwards.
-pub fn second_instance(ctx: &Arc<AppContext>) {
+/// Another start of unimux (or a 1.1.x on the same dir): focus the window and open the files it was given, or, while winding
+/// down, start again afterwards (the files wait for that start).
+pub fn second_instance(ctx: &Arc<AppContext>, files: Vec<String>) {
     if ctx.lifecycle.is_quitting() {
         ctx.lifecycle.relaunch_requested.store(true, Ordering::SeqCst);
+        ctx.open_files.push(files);
         return;
     }
+    crate::open_files::deliver(ctx, files);
     crate::windows::focus_main(ctx);
 }
 

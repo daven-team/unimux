@@ -63,6 +63,10 @@ try {
     '  SetOutPath $INSTDIR',
     '  !insertmacro NSIS_HOOK_PREINSTALL',
     '  !insertmacro NSIS_HOOK_POSTINSTALL',
+    '  WriteUninstaller "$INSTDIR\\uninstall.exe"',
+    'SectionEnd',
+    'Section Uninstall',
+    '  !insertmacro NSIS_HOOK_POSTUNINSTALL',
     'SectionEnd',
     '',
   ].join('\r\n');

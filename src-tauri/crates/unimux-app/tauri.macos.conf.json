@@ -3,6 +3,28 @@
   "identifier": "com.ajzakomator.app",
   "bundle": {
     "targets": ["app", "dmg"],
+    "fileAssociations": [
+      {
+        "ext": [],
+        "name": "Text and source code",
+        "contentTypes": [
+          "public.text",
+          "public.plain-text",
+          "public.utf8-plain-text",
+          "public.source-code",
+          "public.script",
+          "public.shell-script",
+          "public.json",
+          "public.xml",
+          "public.yaml",
+          "public.log",
+          "public.comma-separated-values-text",
+          "net.daringfireball.markdown"
+        ],
+        "role": "Editor",
+        "rank": "Alternate"
+      }
+    ],
     "macOS": {
       "minimumSystemVersion": "12.0",
       "entitlements": "./entitlements.mac.plist",

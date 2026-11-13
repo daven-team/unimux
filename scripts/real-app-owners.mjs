@@ -8,7 +8,7 @@ const EXACT = {
   // state and app (wave 0)
   'state:edit': 'F9', 'state:load': 'F9', 'state:snapshot': 'F9',
   'app:reportError': 'F5', 'app:startupMark': 'F11', 'app:claimStart': 'F11',
-  'app:quitAnswer': 'W6', 'app:quitGuard': 'W6',
+  'app:quitAnswer': 'W6', 'app:quitGuard': 'W6', 'app:takeOpenFiles': 'W4',
   // OS integration
   'attention:flash': 'W4', 'notify': 'W4', 'notify:show': 'W4', 'dialog:pickFolder': 'W4',
   'clipboard:read': 'W4', 'clipboard:write': 'W4', 'clipboard:writeSecret': 'W4',

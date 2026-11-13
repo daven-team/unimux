@@ -78,8 +78,120 @@ fn current_cwd() -> String {
     std::env::current_dir().map(|p| p.display().to_string()).unwrap_or_default()
 }
 
+/// Our command line, every argument quoted the way `CommandLineToArgvW` reads it back (a path with spaces stays one argument;
+/// Chromium hands the raw `GetCommandLineW`, which follows the same rules).
 fn current_command_line() -> String {
-    std::env::args().collect::<Vec<_>>().join(" ")
+    let args: Vec<String> = std::env::args_os().map(|a| a.to_string_lossy().into_owned()).collect();
+    join_command_line(&args)
+}
+
+/// Joins arguments into one command line (the MSVC / `CommandLineToArgvW` quoting rules), the inverse of
+/// [`split_command_line`].
+pub fn join_command_line(args: &[String]) -> String {
+    let mut out = String::new();
+    for (i, arg) in args.iter().enumerate() {
+        if i > 0 {
+            out.push(' ');
+        }
+        if !arg.is_empty() && !arg.contains([' ', '\t', '\n', '"']) {
+            out.push_str(arg);
+            continue;
+        }
+        out.push('"');
+        let mut backslashes = 0usize;
+        for c in arg.chars() {
+            if c == '\\' {
+                backslashes += 1;
+                continue;
+            }
+            // Backslashes before a quote are doubled, plus one for the quote itself.
+            let n = if c == '"' { backslashes * 2 + 1 } else { backslashes };
+            out.extend(std::iter::repeat_n('\\', n));
+            backslashes = 0;
+            out.push(c);
+        }
+        // Trailing backslashes are doubled: the closing quote must not be escaped.
+        out.extend(std::iter::repeat_n('\\', backslashes * 2));
+        out.push('"');
+    }
+    out
+}
+
+/// Splits a command line the way `CommandLineToArgvW` does: the program name up to the next quote or blank (no escapes),
+/// then the MSVC rules (2n backslashes + quote = n backslashes and a quote toggle, 2n+1 = n backslashes and a literal quote,
+/// `""` inside quotes = a literal quote). Reads the command line of another unimux process (1.2.x, or 1.1.x's raw one).
+pub fn split_command_line(line: &str) -> Vec<String> {
+    let chars: Vec<char> = line.chars().collect();
+    let blank = |c: char| matches!(c, ' ' | '\t' | '\n' | '\r');
+    let mut args = Vec::new();
+    let mut i = 0;
+    while i < chars.len() && blank(chars[i]) {
+        i += 1;
+    }
+    if i < chars.len() {
+        let mut program = String::new();
+        if chars[i] == '"' {
+            i += 1;
+            while i < chars.len() && chars[i] != '"' {
+                program.push(chars[i]);
+                i += 1;
+            }
+            i += 1;
+        } else {
+            while i < chars.len() && !blank(chars[i]) {
+                program.push(chars[i]);
+                i += 1;
+            }
+        }
+        args.push(program);
+    }
+    loop {
+        while i < chars.len() && blank(chars[i]) {
+            i += 1;
+        }
+        if i >= chars.len() {
+            break;
+        }
+        let mut arg = String::new();
+        let mut quoted = false;
+        while i < chars.len() {
+            let c = chars[i];
+            if c == '\\' {
+                let start = i;
+                while i < chars.len() && chars[i] == '\\' {
+                    i += 1;
+                }
+                let n = i - start;
+                if chars.get(i) == Some(&'"') {
+                    arg.extend(std::iter::repeat_n('\\', n / 2));
+                    if n % 2 == 1 {
+                        arg.push('"');
+                        i += 1;
+                    }
+                } else {
+                    arg.extend(std::iter::repeat_n('\\', n));
+                }
+                continue;
+            }
+            if c == '"' {
+                if quoted && chars.get(i + 1) == Some(&'"') {
+                    arg.push('"');
+                    i += 2;
+                    continue;
+                }
+                quoted = !quoted;
+                i += 1;
+                continue;
+            }
+            if blank(c) && !quoted {
+                break;
+            }
+            arg.push(c);
+            i += 1;
+        }
+        args.push(arg);
+    }
+    args
 }
 
 fn try_lock(data_dir: &Path) -> io::Result<Option<(File, PathBuf)>> {
@@ -233,7 +345,7 @@ pub mod win {
     use windows::Win32::System::DataExchange::COPYDATASTRUCT;
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DispatchMessageW, FindWindowExW, GetMessageW, HWND_MESSAGE, MSG, PostMessageW,
+        CreateWindowExW, DefWindowProcW, DispatchMessageW, FindWindowExW, GetMessageW, GetWindowThreadProcessId, HWND_MESSAGE, MSG, PostMessageW,
         RegisterClassExW, SMTO_ABORTIFHUNG, SendMessageTimeoutW, TranslateMessage, WINDOW_EX_STYLE, WM_CLOSE, WM_COPYDATA,
         WNDCLASSEXW, WS_OVERLAPPED,
     };
@@ -340,6 +452,14 @@ pub mod win {
     pub fn notify(hwnd: HWND, cwd: &str, command_line: &str) -> bool {
         let text: Vec<u16> = start_message(cwd, command_line).encode_utf16().chain(std::iter::once(0)).collect();
         let cds = COPYDATASTRUCT { dwData: 0, cbData: (text.len() * 2) as u32, lpData: text.as_ptr() as *mut _ };
+        // The owner brings its window to the front: it may do so only with the foreground right this process got from the
+        // user's click (Explorer's "Open with", a shortcut), passed on first like Chromium does.
+        let mut owner_pid = 0u32;
+        // SAFETY: plain lookup of the window's process.
+        unsafe { GetWindowThreadProcessId(hwnd, Some(&mut owner_pid)) };
+        if owner_pid != 0 {
+            crate::win::allow_set_foreground(owner_pid);
+        }
         let mut result: usize = 0;
         // SAFETY: the data outlives the synchronous call.
         let sent = unsafe {
@@ -472,6 +592,27 @@ mod tests {
         let m = start_message("C:\\x", "unimux.exe --a");
         assert_eq!(parse_start_message(&m), Some(SecondInstance { cwd: "C:\\x".into(), command_line: "unimux.exe --a".into() }));
         assert_eq!(parse_start_message("STOP\0x"), None);
+    }
+
+    #[test]
+    fn command_lines_round_trip_and_raw_ones_split_like_command_line_to_argv() {
+        let args: Vec<String> = [
+            r"C:\Program Files\unimux\unimux.exe",
+            r"D:\My Files\notes.md",
+            "plain.txt",
+            "",
+            r#"with "quote""#,
+            r"C:\dir with space\",
+            r#"a\\"b"#,
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        assert_eq!(split_command_line(&join_command_line(&args)), args);
+        // Explorer's `"<exe>" "%1"`, and an unquoted line with an empty argument.
+        assert_eq!(split_command_line(r#""C:\Apps\unimux.exe" "C:\a b\c.txt""#), vec![r"C:\Apps\unimux.exe", r"C:\a b\c.txt"]);
+        assert_eq!(split_command_line(r#"unimux.exe --flag  x\y """#), vec!["unimux.exe", "--flag", r"x\y", ""]);
+        assert!(split_command_line("  ").is_empty());
     }
 
     #[test]

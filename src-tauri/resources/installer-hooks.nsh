@@ -98,6 +98,185 @@ Var UnimuxMachineDesktop
   ${EndIf}
 !macroend
 
+; Opening files from Explorer (`unimux.exe "<path>"`, src-tauri/crates/unimux-app/src/open_files.rs). SHCTX is HKCU for a
+; per-user install and HKLM for an all-users one, so every key lands under the install's own Software\Classes:
+; - Applications\unimux.exe: the app in "Open with" for the types in SupportedTypes, with its name and icon;
+; - the ProgID unimux.file and an OpenWithProgids value per extension: unimux in each type's "Open with" list, and a choice in
+;   Settings > Default apps through the Capabilities registered in RegisteredApplications. No extension's default handler is
+;   ever set: the user picks unimux if they want it;
+; - *\shell\unimux: "Open in unimux" in the context menu of every file (on Windows 11 under "Show more options"), in the
+;   installer's language.
+; An update (`--updated`) writes them again, so they always point at the current install dir; the uninstaller removes those
+; that still point at its own exe.
+!define UNIMUX_PROGID "unimux.file"
+!define UNIMUX_APPKEY "Software\Classes\Applications\${MAINBINARYNAME}.exe"
+!define UNIMUX_VERBKEY "Software\Classes\*\shell\${PRODUCTNAME}"
+!define UNIMUX_CAPKEY "${MANUPRODUCTKEY}\Capabilities"
+
+; Text and source files unimux's editor opens.
+!macro UNIMUX_FOR_EXTENSIONS action
+  !insertmacro ${action} ".txt"
+  !insertmacro ${action} ".text"
+  !insertmacro ${action} ".md"
+  !insertmacro ${action} ".markdown"
+  !insertmacro ${action} ".mdx"
+  !insertmacro ${action} ".json"
+  !insertmacro ${action} ".jsonc"
+  !insertmacro ${action} ".json5"
+  !insertmacro ${action} ".js"
+  !insertmacro ${action} ".mjs"
+  !insertmacro ${action} ".cjs"
+  !insertmacro ${action} ".jsx"
+  !insertmacro ${action} ".ts"
+  !insertmacro ${action} ".mts"
+  !insertmacro ${action} ".cts"
+  !insertmacro ${action} ".tsx"
+  !insertmacro ${action} ".vue"
+  !insertmacro ${action} ".svelte"
+  !insertmacro ${action} ".css"
+  !insertmacro ${action} ".scss"
+  !insertmacro ${action} ".less"
+  !insertmacro ${action} ".html"
+  !insertmacro ${action} ".htm"
+  !insertmacro ${action} ".xml"
+  !insertmacro ${action} ".xaml"
+  !insertmacro ${action} ".svg"
+  !insertmacro ${action} ".yml"
+  !insertmacro ${action} ".yaml"
+  !insertmacro ${action} ".toml"
+  !insertmacro ${action} ".ini"
+  !insertmacro ${action} ".cfg"
+  !insertmacro ${action} ".conf"
+  !insertmacro ${action} ".properties"
+  !insertmacro ${action} ".env"
+  !insertmacro ${action} ".log"
+  !insertmacro ${action} ".csv"
+  !insertmacro ${action} ".tsv"
+  !insertmacro ${action} ".sql"
+  !insertmacro ${action} ".diff"
+  !insertmacro ${action} ".patch"
+  !insertmacro ${action} ".py"
+  !insertmacro ${action} ".rb"
+  !insertmacro ${action} ".php"
+  !insertmacro ${action} ".lua"
+  !insertmacro ${action} ".pl"
+  !insertmacro ${action} ".rs"
+  !insertmacro ${action} ".go"
+  !insertmacro ${action} ".java"
+  !insertmacro ${action} ".kt"
+  !insertmacro ${action} ".kts"
+  !insertmacro ${action} ".gradle"
+  !insertmacro ${action} ".scala"
+  !insertmacro ${action} ".swift"
+  !insertmacro ${action} ".dart"
+  !insertmacro ${action} ".c"
+  !insertmacro ${action} ".h"
+  !insertmacro ${action} ".cpp"
+  !insertmacro ${action} ".cc"
+  !insertmacro ${action} ".hpp"
+  !insertmacro ${action} ".cs"
+  !insertmacro ${action} ".csproj"
+  !insertmacro ${action} ".fs"
+  !insertmacro ${action} ".sh"
+  !insertmacro ${action} ".bash"
+  !insertmacro ${action} ".zsh"
+  !insertmacro ${action} ".ps1"
+  !insertmacro ${action} ".psm1"
+  !insertmacro ${action} ".bat"
+  !insertmacro ${action} ".cmd"
+  !insertmacro ${action} ".gitignore"
+  !insertmacro ${action} ".gitattributes"
+  !insertmacro ${action} ".editorconfig"
+  !insertmacro ${action} ".dockerfile"
+  !insertmacro ${action} ".tf"
+  !insertmacro ${action} ".graphql"
+  !insertmacro ${action} ".proto"
+!macroend
+
+!macro UNIMUX_REGISTER_EXTENSION ext
+  WriteRegStr SHCTX "${UNIMUX_APPKEY}\SupportedTypes" "${ext}" ""
+  WriteRegStr SHCTX "Software\Classes\${ext}\OpenWithProgids" "${UNIMUX_PROGID}" ""
+  WriteRegStr SHCTX "${UNIMUX_CAPKEY}\FileAssociations" "${ext}" "${UNIMUX_PROGID}"
+!macroend
+
+; Only our value; the type's key goes only when nothing else is left in it.
+!macro UNIMUX_UNREGISTER_EXTENSION ext
+  DeleteRegValue SHCTX "Software\Classes\${ext}\OpenWithProgids" "${UNIMUX_PROGID}"
+  DeleteRegKey /ifempty SHCTX "Software\Classes\${ext}\OpenWithProgids"
+  DeleteRegKey /ifempty SHCTX "Software\Classes\${ext}"
+!macroend
+
+; "Open in unimux" in the installer's language ($LANGUAGE: Polish 1045, German 1031, Spanish 1034, French 1036, Portuguese
+; (Brazil) 1046, anything else English). Non-ASCII letters are made from their code points: the hooks file is read in the
+; build machine's ANSI code page.
+!macro UNIMUX_VERB_TEXT out
+  ${If} $LANGUAGE = 1045
+    IntFmt $R9 "%c" 0x00F3
+    StrCpy ${out} "Otw$R9rz w ${PRODUCTNAME}"
+  ${ElseIf} $LANGUAGE = 1031
+    IntFmt $R9 "%c" 0x00F6
+    StrCpy ${out} "In ${PRODUCTNAME} $R9ffnen"
+  ${ElseIf} $LANGUAGE = 1034
+    StrCpy ${out} "Abrir en ${PRODUCTNAME}"
+  ${ElseIf} $LANGUAGE = 1036
+    StrCpy ${out} "Ouvrir dans ${PRODUCTNAME}"
+  ${ElseIf} $LANGUAGE = 1046
+    StrCpy ${out} "Abrir no ${PRODUCTNAME}"
+  ${Else}
+    StrCpy ${out} "Open in ${PRODUCTNAME}"
+  ${EndIf}
+!macroend
+
+!macro UNIMUX_REGISTER_OPEN_WITH
+  StrCpy $R5 '"$INSTDIR\${MAINBINARYNAME}.exe" "%1"'
+  StrCpy $R6 '"$INSTDIR\${MAINBINARYNAME}.exe",0'
+  ; The app itself: "Open with" > unimux, with its own name and icon.
+  WriteRegStr SHCTX "${UNIMUX_APPKEY}" "FriendlyAppName" "${PRODUCTNAME}"
+  WriteRegStr SHCTX "${UNIMUX_APPKEY}\DefaultIcon" "" $R6
+  WriteRegStr SHCTX "${UNIMUX_APPKEY}\shell\open\command" "" $R5
+  ; The ProgID the extensions and Default apps point at.
+  WriteRegStr SHCTX "Software\Classes\${UNIMUX_PROGID}\DefaultIcon" "" $R6
+  WriteRegStr SHCTX "Software\Classes\${UNIMUX_PROGID}\Application" "ApplicationName" "${PRODUCTNAME}"
+  WriteRegStr SHCTX "Software\Classes\${UNIMUX_PROGID}\Application" "ApplicationIcon" $R6
+  WriteRegStr SHCTX "Software\Classes\${UNIMUX_PROGID}\shell\open\command" "" $R5
+  ; Settings > Default apps > unimux.
+  WriteRegStr SHCTX "${UNIMUX_CAPKEY}" "ApplicationName" "${PRODUCTNAME}"
+  WriteRegStr SHCTX "${UNIMUX_CAPKEY}" "ApplicationDescription" "${PRODUCTNAME}"
+  WriteRegStr SHCTX "${UNIMUX_CAPKEY}" "ApplicationIcon" $R6
+  !insertmacro UNIMUX_FOR_EXTENSIONS UNIMUX_REGISTER_EXTENSION
+  WriteRegStr SHCTX "Software\RegisteredApplications" "${PRODUCTNAME}" "${UNIMUX_CAPKEY}"
+  ; The context menu of every file.
+  !insertmacro UNIMUX_VERB_TEXT $R7
+  WriteRegStr SHCTX "${UNIMUX_VERBKEY}" "MUIVerb" $R7
+  WriteRegStr SHCTX "${UNIMUX_VERBKEY}" "Icon" '"$INSTDIR\${MAINBINARYNAME}.exe"'
+  WriteRegStr SHCTX "${UNIMUX_VERBKEY}\command" "" $R5
+  ; Explorer reads the associations again.
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
+  ClearErrors
+!macroend
+
+; Removes what still points at this install's exe (another install may have taken a key over since).
+!macro UNIMUX_UNREGISTER_OPEN_WITH
+  StrCpy $R5 '"$INSTDIR\${MAINBINARYNAME}.exe" "%1"'
+  ReadRegStr $R7 SHCTX "${UNIMUX_APPKEY}\shell\open\command" ""
+  ${If} $R7 == $R5
+    DeleteRegKey SHCTX "${UNIMUX_APPKEY}"
+  ${EndIf}
+  ReadRegStr $R7 SHCTX "Software\Classes\${UNIMUX_PROGID}\shell\open\command" ""
+  ${If} $R7 == $R5
+    DeleteRegKey SHCTX "Software\Classes\${UNIMUX_PROGID}"
+    !insertmacro UNIMUX_FOR_EXTENSIONS UNIMUX_UNREGISTER_EXTENSION
+    DeleteRegValue SHCTX "Software\RegisteredApplications" "${PRODUCTNAME}"
+    DeleteRegKey SHCTX "${UNIMUX_CAPKEY}"
+  ${EndIf}
+  ReadRegStr $R7 SHCTX "${UNIMUX_VERBKEY}\command" ""
+  ${If} $R7 == $R5
+    DeleteRegKey SHCTX "${UNIMUX_VERBKEY}"
+  ${EndIf}
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
+  ClearErrors
+!macroend
+
 !macro NSIS_HOOK_PREINSTALL
 !if "${PRODUCTNAME}" == "unimux"
   ; An `--updated` run (electron-updater, or the unimux update window) keeps the user's shortcuts as they are: the template
@@ -273,6 +452,9 @@ Var UnimuxMachineDesktop
   !insertmacro UNIMUX_STAMP_AUMID "${UNIMUX_TASKBAR_PIN}"
   ClearErrors
 
+  ; 2b. "Open with", Default apps and the context menu, pointing at this install's exe (an update writes them again).
+  !insertmacro UNIMUX_REGISTER_OPEN_WITH
+
   ; 3. electron-updater's `--force-run`: start the new app as the user once the files are in place.
   ${GetParameters} $R0
   ClearErrors
@@ -281,5 +463,12 @@ Var UnimuxMachineDesktop
     nsis_tauri_utils::RunAsUser "$INSTDIR\${MAINBINARYNAME}.exe" ""
   ${EndIf}
   ClearErrors
+!endif
+!macroend
+
+!macro NSIS_HOOK_POSTUNINSTALL
+!if "${PRODUCTNAME}" == "unimux"
+  ; After the files are gone (a cancelled uninstall keeps the registration): "Open with", Default apps and the context menu.
+  !insertmacro UNIMUX_UNREGISTER_OPEN_WITH
 !endif
 !macroend

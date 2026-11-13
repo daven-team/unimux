@@ -19,6 +19,17 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
         async move { Ok(Value::Bool(c.claim_app_start())) }
     });
 
+    // The files the OS asked to open (open_files.rs), taken by the main window at boot and on every `app:open-files`; another
+    // window gets none (they stay for the main one).
+    let c = ctx.clone();
+    r.invoke("app:takeOpenFiles", move |call| {
+        let c = c.clone();
+        async move {
+            let paths = if call.caller.is_main() { c.open_files.take() } else { Vec::new() };
+            Ok(Value::from(paths))
+        }
+    });
+
     let c = ctx.clone();
     r.send("app:startupMark", move |call| {
         let c = c.clone();
@@ -83,6 +94,25 @@ mod tests {
     fn send(router: &unimux_ipc::Router, command: &str, args: Vec<serde_json::Value>) {
         let caller = Caller::new("main", "http://tauri.localhost/index.html");
         tauri::async_runtime::block_on(router.run_send(Call::new(command, caller, args)));
+    }
+
+    #[test]
+    fn open_files_are_taken_once_and_only_by_the_main_window() {
+        let (_dir, ctx, router) = test_ctx(json!({ "version": 1, "projects": [] }));
+        // Another window is refused (unknown label) or gets nothing; the paths stay for the main window.
+        let take = |label: &str| match tauri::async_runtime::block_on(router.invoke(Call::new(
+            "app:takeOpenFiles",
+            Caller::new(label, "http://tauri.localhost/index.html"),
+            vec![],
+        ))) {
+            Ok(unimux_ipc::Reply::Json(v)) => v,
+            _ => json!([]),
+        };
+        crate::open_files::deliver(&ctx, vec!["C:\\a.txt".into(), "C:\\b.md".into()]);
+        assert_eq!(take("detached-1"), json!([]));
+        assert_eq!(take("main"), json!(["C:\\a.txt", "C:\\b.md"]));
+        assert_eq!(take("main"), json!([]));
+        ctx.saver.stop();
     }
 
     #[test]

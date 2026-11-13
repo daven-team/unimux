@@ -20,6 +20,7 @@ mod hooks;
 mod ipc;
 mod lifecycle;
 mod mac_chrome;
+mod open_files;
 mod port_message;
 mod pty_transport;
 #[cfg(feature = "test-bridge")]
@@ -135,12 +136,18 @@ fn main() {
     // One instance per data dir, Electron 1.1.x included (it forwards to us; we forward to it).
     let second: Arc<parking_lot::Mutex<Option<Arc<AppContext>>>> = Arc::new(parking_lot::Mutex::new(None));
     let second_ctx = second.clone();
-    let on_second = Arc::new(move |_s: unimux_platform::instance::SecondInstance| {
+    let on_second = Arc::new(move |s: unimux_platform::instance::SecondInstance| {
+        // The files it was started with (Explorer's "Open with": `unimux.exe "<path>"`), relative ones against its folder.
+        let args = unimux_platform::instance::split_command_line(&s.command_line);
+        let files = open_files::file_args(&args, std::path::Path::new(&s.cwd));
         if let Some(ctx) = second_ctx.lock().clone() {
             let c = ctx.clone();
             if let Some(app) = ctx.app() {
-                // Focus, or (while winding down) start again after the exit.
-                let _ = app.run_on_main_thread(move || lifecycle::second_instance(&c));
+                // Focus and open the files, or (while winding down) start again after the exit.
+                let _ = app.run_on_main_thread(move || lifecycle::second_instance(&c, files));
+            } else {
+                // Not running Tauri yet: the files wait for the main window like the ones of our own command line.
+                ctx.open_files.push(files);
             }
         }
     });
@@ -183,6 +190,9 @@ fn main() {
     let ctx = AppContext::new(data_dir.clone(), overrides, crash.clone(), timer.clone(), startup_log, state);
     // Held for the whole run; released before a relaunch (W6).
     ctx.lifecycle.keep_instance(instance);
+    // Files on our own command line (Explorer's "Open with" / default app): they wait for the main window's renderer.
+    let own_args: Vec<String> = std::env::args_os().map(|a| a.to_string_lossy().into_owned()).collect();
+    ctx.open_files.push(open_files::file_args(&own_args, &std::env::current_dir().unwrap_or_default()));
     let builder = build_router(&ctx);
     for error in builder.errors() {
         crash.error(&format!("ipc registration: {error}"));
@@ -311,6 +321,14 @@ fn main() {
             hooks::stop(&run_ctx);
             // After the wind-down (or a forced exit): whatever came in after the last save, then a pending relaunch.
             lifecycle::after_exit(&run_ctx);
+        }
+        // Finder's Open With / a file dropped on the Dock icon (at the start too: the files wait for the main window).
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        RunEvent::Opened { urls } => {
+            let files = open_files::file_urls(&urls);
+            if !files.is_empty() {
+                lifecycle::second_instance(&run_ctx, files);
+            }
         }
         _ => {}
     });

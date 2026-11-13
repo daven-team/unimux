@@ -379,6 +379,6 @@ mod tests {
         assert_eq!(r.status("cell:alive"), Status::Fallback);
         assert_eq!(r.status("state:snapshot"), Status::Implemented);
         assert_eq!(r.status("db:connect"), Status::NotYet);
-        assert_eq!(r.report().len(), 220);
+        assert_eq!(r.report().len(), 221);
     }
 }
