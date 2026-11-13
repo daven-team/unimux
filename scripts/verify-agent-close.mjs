@@ -84,7 +84,7 @@ try {
   ok('the Files tree shows a file made during the turn after the turn ends');
   await sleep(1000);
   const single = await main.notes();
-  if (single.length !== 1 || single[0].body !== 'Reviewer has finished' || single[0].title !== 'Project X · Main' || single[0].cellId !== ids.a) throw new Error(`single notification: ${JSON.stringify(single)}`);
+  if (single.length !== 1 || !/^Reviewer (has finished|finished after [0-9]+ (s|min))$/.test(single[0].body) || single[0].title !== 'Project X · Main' || single[0].cellId !== ids.a) throw new Error(`single notification: ${JSON.stringify(single)}`);
   ok(`notification names the cell: "${single[0].title}" / "${single[0].body}"`);
   await main.hook(ids.a, 'prompt');
   await main.hook(ids.b, 'prompt');
