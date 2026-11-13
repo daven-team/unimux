@@ -121,7 +121,7 @@ async function round(name, dir, oldArgs, newDir = dir) {
   const entries = uninstallEntries();
   console.log('apps & features after:', entries);
   assert.equal(entries.length, 1, `one entry in Apps & features: ${entries.join('; ')}`);
-  assert.match(entries[0], /1\.2\.0/);
+  assert.ok(entries[0].includes(NEW_VERSION), `Apps & features shows ${NEW_VERSION}: ${entries[0]}`);
   assert.equal(readFileSync(marker, 'utf8'), content, 'user data kept');
   await waitFor('the marker for the update window', () => existsSync(join(dataDir, 'update', 'installer-done')));
   assertOpenWithRegistered(newExe);
