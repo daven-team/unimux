@@ -345,9 +345,9 @@ pub mod win {
     use windows::Win32::System::DataExchange::COPYDATASTRUCT;
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DispatchMessageW, FindWindowExW, GetMessageW, GetWindowThreadProcessId, HWND_MESSAGE, MSG, PostMessageW,
-        RegisterClassExW, SMTO_ABORTIFHUNG, SendMessageTimeoutW, TranslateMessage, WINDOW_EX_STYLE, WM_CLOSE, WM_COPYDATA,
-        WNDCLASSEXW, WS_OVERLAPPED,
+        CreateWindowExW, DefWindowProcW, DispatchMessageW, FindWindowExW, GetMessageW, GetWindowThreadProcessId, HWND_MESSAGE,
+        MSG, PostMessageW, RegisterClassExW, SMTO_ABORTIFHUNG, SendMessageTimeoutW, TranslateMessage, WINDOW_EX_STYLE, WM_CLOSE,
+        WM_COPYDATA, WNDCLASSEXW, WS_OVERLAPPED,
     };
     use windows::core::{HSTRING, PCWSTR, w};
 

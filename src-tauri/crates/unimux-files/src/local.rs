@@ -281,7 +281,10 @@ mod tests {
         let missing = dir.path().join("nope").join("a.txt").to_string_lossy().into_owned();
         assert!(matches!(local.save_as(&missing, Some("x"), false), SaveResult::Failed(_)));
         assert_eq!(local.save_as("relative.txt", Some("x"), false), SaveResult::Failed(EDIT_REFUSED.into()));
-        let leftovers = std::fs::read_dir(dir.path()).unwrap().filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().contains(".mc-save-")).count();
+        let leftovers = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().contains(".mc-save-"))
+            .count();
         assert_eq!(leftovers, 0);
     }
 }

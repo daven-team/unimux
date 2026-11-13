@@ -102,7 +102,9 @@ pub fn write_new_text(target: &str, text: Option<&str>, ill_formed: bool) -> Sav
     let stat = match fsx::stat(target) {
         Ok(st) if !st.is_file => return SaveResult::Failed("Wybierz plik, aby zapisać jego treść.".into()),
         Ok(st) => st,
-        Err(e) if e.is("ENOENT") => fsx::Stat { is_file: true, is_dir: false, size: 0, mtime_ms: 0.0, mode: 0o666, readonly: false },
+        Err(e) if e.is("ENOENT") => {
+            fsx::Stat { is_file: true, is_dir: false, size: 0, mtime_ms: 0.0, mode: 0o666, readonly: false }
+        }
         Err(e) => return SaveResult::Failed(file_error(&e)),
     };
     let staged = format!("{target}.mc-save-{}", uuid::Uuid::new_v4());
