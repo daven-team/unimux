@@ -20,6 +20,8 @@ if (process.env.GITHUB_ACTIONS !== 'true' || process.env.RUNNER_ENVIRONMENT !== 
 const [oldSetup, newSetup] = process.argv.slice(2).map((p) => resolve(p));
 assert.ok(existsSync(oldSetup), 'the 1.1.4 installer');
 assert.ok(existsSync(newSetup), 'the 1.2.0 installer');
+// The version the new installer carries (the app being released), not a fixed 1.2.0.
+const NEW_VERSION = JSON.parse(readFileSync(new URL('../src-tauri/crates/unimux-app/tauri.conf.json', import.meta.url), 'utf8')).version;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const local = process.env.LOCALAPPDATA;
@@ -112,7 +114,7 @@ async function round(name, dir, oldArgs, newDir = dir) {
   const newExe = join(newDir, 'unimux.exe');
   assert.ok(existsSync(newExe), `unimux.exe is in ${newDir}`);
   const version = ps(`(Get-Item '${newExe}').VersionInfo.ProductVersion`);
-  assert.ok(version.startsWith('1.2.0'), `installed version: ${version}`);
+  assert.ok(version.startsWith(NEW_VERSION), `installed version: ${version} (expected ${NEW_VERSION})`);
   for (const gone of [join('resources', 'app.asar'), 'ffmpeg.dll', 'chrome_100_percent.pak', 'icudtl.dat']) {
     assert.ok(!existsSync(join(dir, gone)) && !existsSync(join(newDir, gone)), `the Electron runtime is gone: ${gone}`);
   }
