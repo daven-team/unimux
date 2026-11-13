@@ -189,6 +189,37 @@ impl LocalFiles {
         }
     }
 
+    /// `local:saveAs`: an editor tab's text written to `path`, which the user chose in the native save dialog. The same places
+    /// as the editor's reads (never the app's own folders, never a UNC or device path); the folder must exist. Afterwards the
+    /// file counts as opened, so its tab saves it in place with local:writeFile.
+    pub fn save_as(&self, path: &str, text: Option<&str>, ill_formed: bool) -> SaveResult {
+        let windows = self.platform == LocalPlatform::Windows;
+        if !valid_local_path(path) || (windows && is_unc_or_device_path(path)) {
+            return SaveResult::Failed(EDIT_REFUSED.into());
+        }
+        let f = self.flavor();
+        let resolved = jspath::resolve(f, &[path]);
+        let real_dir = match fsx::realpath(&jspath::dirname(f, &resolved)) {
+            Ok(dir) => dir,
+            Err(e) => return SaveResult::Failed(file_error(&e)),
+        };
+        let target = jspath::join_name(f, &real_dir, &jspath::basename(f, &resolved));
+        // An existing file reached through a link is written where the link points (like a save).
+        let real = fsx::realpath(&target).unwrap_or(target);
+        if windows && (is_unc_or_device_path(&real_dir) || is_unc_or_device_path(&real)) {
+            return SaveResult::Failed(EDIT_REFUSED.into());
+        }
+        if self.forbidden_roots().iter().any(|root| self.inside(root, &real) || self.inside(root, &resolved)) {
+            return SaveResult::Failed(EDIT_REFUSED.into());
+        }
+        let result = save::write_new_text(&real, text, ill_formed);
+        if result == SaveResult::Ok {
+            // The new file's real path in the form a later local:writeFile resolves it to.
+            self.remember(&fsx::realpath(&real).unwrap_or(real));
+        }
+        result
+    }
+
     /// The main page reloaded or crashed: what it opened counts no more (restored drafts read again before they save).
     pub fn renderer_gone(&self) {
         self.opened.lock().clear();
@@ -224,5 +255,33 @@ mod tests {
         assert!(is_unc_or_device_path("\\\\.\\PhysicalDrive0"));
         assert!(is_unc_or_device_path("//server/share"));
         assert!(!is_unc_or_device_path("C:\\a.txt"));
+    }
+
+    #[test]
+    fn save_as_writes_a_new_file_that_then_saves_in_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let forbidden = dir.path().join("app");
+        std::fs::create_dir(&forbidden).unwrap();
+        let local = LocalFiles::new(LocalPlatform::native(), vec![forbidden.to_string_lossy().into_owned()]);
+        let path = dir.path().join("new.txt").to_string_lossy().into_owned();
+        assert_eq!(local.write_file(Some(&path), Some("x"), Some("")), SaveResult::Failed(FILE_GONE.into()));
+        assert_eq!(local.save_as(&path, Some("one\ntwo"), false), SaveResult::Ok);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "one\ntwo");
+        // Opened by the save: the next save writes in place against the saved text.
+        assert_eq!(local.write_file(Some(&path), Some("three"), Some("one\ntwo")), SaveResult::Ok);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "three");
+        // An existing file is replaced (the dialog asked).
+        assert_eq!(local.save_as(&path, Some("four"), false), SaveResult::Ok);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "four");
+        // Never into the app's folders, never ill-formed text, never into a folder that is not there.
+        let inside = forbidden.join("a.txt").to_string_lossy().into_owned();
+        assert_eq!(local.save_as(&inside, Some("x"), false), SaveResult::Failed(EDIT_REFUSED.into()));
+        assert!(!forbidden.join("a.txt").exists());
+        assert_eq!(local.save_as(&path, Some("x"), true), SaveResult::Failed(save::INVALID_TEXT.into()));
+        let missing = dir.path().join("nope").join("a.txt").to_string_lossy().into_owned();
+        assert!(matches!(local.save_as(&missing, Some("x"), false), SaveResult::Failed(_)));
+        assert_eq!(local.save_as("relative.txt", Some("x"), false), SaveResult::Failed(EDIT_REFUSED.into()));
+        let leftovers = std::fs::read_dir(dir.path()).unwrap().filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().contains(".mc-save-")).count();
+        assert_eq!(leftovers, 0);
     }
 }

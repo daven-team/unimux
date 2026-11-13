@@ -6,13 +6,13 @@
   "test/contract/preload-channels.json"
  ],
  "summary": {
-  "methods": 254,
-  "invokeMethods": 209,
-  "sendMethods": 42,
+  "methods": 258,
+  "invokeMethods": 211,
+  "sendMethods": 44,
   "syncMembers": 3,
-  "channels": 221,
-  "invokeChannels": 179,
-  "sendChannels": 42,
+  "channels": 225,
+  "invokeChannels": 181,
+  "sendChannels": 44,
   "events": 46
  },
  "ports": [
@@ -590,6 +590,13 @@
     "detach.works"
    ]
   },
+  "dialog:openFile": {
+   "kind": "invoke",
+   "domain": "os",
+   "methods": [
+    "openFileDialog"
+   ]
+  },
   "dialog:pickFolder": {
    "kind": "invoke",
    "domain": "os",
@@ -980,6 +987,13 @@
    "domain": "files",
    "methods": [
     "localFs.roots"
+   ]
+  },
+  "local:saveAs": {
+   "kind": "invoke",
+   "domain": "files",
+   "methods": [
+    "localFs.saveAs"
    ]
   },
   "local:statFile": {
@@ -1589,6 +1603,20 @@
    "domain": "window",
    "methods": [
     "windowControls.minimize"
+   ]
+  },
+  "window:setZoom": {
+   "kind": "send",
+   "domain": "window",
+   "methods": [
+    "windowControls.setZoom"
+   ]
+  },
+  "window:toggleFullscreen": {
+   "kind": "send",
+   "domain": "window",
+   "methods": [
+    "windowControls.toggleFullscreen"
    ]
   },
   "window:toggleMaximize": {
@@ -2509,6 +2537,15 @@
    "params": [],
    "returns": "Promise<string | null>",
    "call": "t.invoke('dialog:pickFolder')"
+  },
+  {
+   "path": "openFileDialog",
+   "kind": "invoke",
+   "channel": "dialog:openFile",
+   "domain": "os",
+   "params": [],
+   "returns": "Promise<string | null>",
+   "call": "t.invoke('dialog:openFile')"
   },
   {
    "path": "pickSoundFile",
@@ -5445,6 +5482,26 @@
    "call": "t.invoke('local:writeFile', path, text, expectedText)"
   },
   {
+   "path": "localFs.saveAs",
+   "kind": "invoke",
+   "channel": "local:saveAs",
+   "domain": "files",
+   "params": [
+    {
+     "name": "name",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "text",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ ok: true; path: string } | { ok: false; canceled: true } | { ok: false; error: string; code?: 'conflict' }>",
+   "call": "t.invoke('local:saveAs', name, text)"
+  },
+  {
    "path": "sshHistory.list",
    "kind": "invoke",
    "channel": "ssh:history:list",
@@ -6020,6 +6077,30 @@
    "params": [],
    "returns": "Promise<boolean>",
    "call": "t.invoke('window:isMaximized')"
+  },
+  {
+   "path": "windowControls.toggleFullscreen",
+   "kind": "send",
+   "channel": "window:toggleFullscreen",
+   "domain": "window",
+   "params": [],
+   "returns": "void",
+   "call": "t.send('window:toggleFullscreen')"
+  },
+  {
+   "path": "windowControls.setZoom",
+   "kind": "send",
+   "channel": "window:setZoom",
+   "domain": "window",
+   "params": [
+    {
+     "name": "factor",
+     "type": "number",
+     "optional": false
+    }
+   ],
+   "returns": "void",
+   "call": "t.send('window:setZoom', factor)"
   },
   {
    "path": "windowControls.setCaptionArea",

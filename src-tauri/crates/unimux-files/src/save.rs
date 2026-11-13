@@ -86,6 +86,36 @@ pub fn write_text(
     save_text(resolve_target, &target, text, ill_formed, expected)
 }
 
+/// Save As (`local:saveAs`): `text` written as UTF-8 to `target`, a file the user chose in the native save dialog (a new one,
+/// or one the dialog confirmed to replace). There is no baseline to compare; the text keeps its own line endings. Staged
+/// next to the target and renamed over it like a save; a replaced file keeps its mode (Unix) or its read-only flag (Windows).
+pub fn write_new_text(target: &str, text: Option<&str>, ill_formed: bool) -> SaveResult {
+    let Some(text) = text else { return SaveResult::Failed(INVALID_TEXT.into()) };
+    if has_binary_controls(text) || ill_formed {
+        return SaveResult::Failed(INVALID_TEXT.into());
+    }
+    if text.len() > PREVIEW_BYTES {
+        return SaveResult::Failed(TOO_BIG.into());
+    }
+    let lock = lock_for(target);
+    let _held = lock.lock();
+    let stat = match fsx::stat(target) {
+        Ok(st) if !st.is_file => return SaveResult::Failed("Wybierz plik, aby zapisać jego treść.".into()),
+        Ok(st) => st,
+        Err(e) if e.is("ENOENT") => fsx::Stat { is_file: true, is_dir: false, size: 0, mtime_ms: 0.0, mode: 0o666, readonly: false },
+        Err(e) => return SaveResult::Failed(file_error(&e)),
+    };
+    let staged = format!("{target}.mc-save-{}", uuid::Uuid::new_v4());
+    let result = write_staged(&staged, text.as_bytes(), &stat).and_then(|()| fsx::rename(&staged, target));
+    match result {
+        Ok(()) => SaveResult::Ok,
+        Err(e) => {
+            let _ = fsx::unlink(&staged);
+            SaveResult::Failed(file_error(&e))
+        }
+    }
+}
+
 /// `/\r\n|\r|\n/g` matches, in order.
 fn line_breaks(text: &str) -> Vec<&str> {
     let bytes = text.as_bytes();

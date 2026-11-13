@@ -66,6 +66,7 @@ export function createMcApi(t: McTransport): McApi {
     answerQuit: (answer) => t.send('app:quitAnswer', answer),
     reportCellStatus: (cellId, status, reason, hooked, cliEnded, exitCode) => t.send('cell:runtime', cellId, status, reason, hooked, cliEnded, exitCode),
     pickFolder: () => t.invoke('dialog:pickFolder'),
+    openFileDialog: () => t.invoke('dialog:openFile'),
     pickSoundFile: () => t.invoke('sound:pick'),
     loadAlertSound: (event, knownKey) => t.invoke('sound:load', event, knownKey),
     systemBeep: () => t.send('sound:beep'),
@@ -254,6 +255,7 @@ export function createMcApi(t: McTransport): McApi {
       readFile: (path) => withImageDataUrl(t.invoke('local:readFile', path)),
       statFile: (path) => t.invoke('local:statFile', path),
       writeFile: (path, text, expectedText) => t.invoke('local:writeFile', path, text, expectedText),
+      saveAs: (name, text) => t.invoke('local:saveAs', name, text),
     },
     sshHistory: {
       list: (hostId) => t.invoke('ssh:history:list', hostId),
@@ -304,6 +306,8 @@ export function createMcApi(t: McTransport): McApi {
       toggleMaximize: () => t.send('window:toggleMaximize'),
       close: () => t.send('window:close'),
       isMaximized: () => t.invoke('window:isMaximized'),
+      toggleFullscreen: () => t.send('window:toggleFullscreen'),
+      setZoom: (factor) => t.send('window:setZoom', factor),
       setCaptionArea: (area, labels) => t.send('window:captionArea', area, labels ?? null),
     },
     detach: {

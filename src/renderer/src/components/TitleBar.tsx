@@ -20,6 +20,7 @@ import { DbKindIcon } from './db/DbKindIcon';
 import { FileIcon } from './FileIcon';
 import { StatusBadges } from './StatusBadges';
 import { Brand } from './Brand';
+import { MenuBar } from './MenuBar';
 import { activateFile, closeFile, closeFiles, keepFile, useFileStore, type FileDocument } from '../files';
 import { useStatusCounts } from '../statusCounts';
 import { splitMenuItems } from '../splitView';
@@ -51,7 +52,7 @@ export const TitleBar = memo(function TitleBar() {
   const pendingTasks = useStore((st) => st.s.automation.tasks.filter((t) => !['completed', 'cancelled'].includes(t.status)).length);
   return (
     <div className="titlebar">
-      <Brand collapsed={sidebarCollapsed} />
+      <Brand collapsed={sidebarCollapsed}><MenuBar /></Brand>
       <div className="spacer" />
       {/* 1.0.7: three groups - search, the panels (left, bottom, right), settings. History left the bar: the project list,
           the project menu, the palette and Ctrl+Shift+H open it. */}
@@ -72,9 +73,9 @@ export const TitleBar = memo(function TitleBar() {
 });
 
 /** What a file tab shows (not the text): typing in the editor changes none of it except `dirty`. */
-interface FileTab { id: string; projectId: string; name: string; relativePath: string; diff: boolean; dirty: boolean; source: FileSource | null; db: DbTabRef | null; redis: RedisTabRef | null; preview: boolean }
+interface FileTab { id: string; projectId: string; name: string; relativePath: string; diff: boolean; dirty: boolean; source: FileSource | null; db: DbTabRef | null; redis: RedisTabRef | null; preview: boolean; untitled: boolean }
 const fileTabsKey = (documents: readonly FileDocument[]): string =>
-  JSON.stringify(documents.map((d) => [d.id, d.projectId, d.name, d.relativePath, !!d.diff, d.text !== d.savedText, d.source ?? null, d.db ?? null, d.redis ?? null, !!d.preview]));
+  JSON.stringify(documents.map((d) => [d.id, d.projectId, d.name, d.relativePath, !!d.diff, d.text !== d.savedText, d.source ?? null, d.db ?? null, d.redis ?? null, !!d.preview, !!d.untitled]));
 /** A tab of the project on screen, or of a file outside the projects (remote and local SFTP files show in every project). */
 const tabShown = (doc: { projectId: string }, projectId: string | undefined): boolean => !doc.projectId || doc.projectId === projectId;
 /** A strip tab's place in the order and its one colour (the chip, the active top line), from stripTabColor. */
@@ -92,8 +93,8 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
   const countsOf = useStatusCounts();
   const cliStatus = useStore((st) => st.ui.cliStatus);
   const tabsKey = useFileStore((st) => fileTabsKey(st.documents));
-  const documents = useMemo(() => (JSON.parse(tabsKey) as Array<[string, string, string, string, boolean, boolean, FileSource | null, DbTabRef | null, RedisTabRef | null, boolean]>)
-    .map(([id, projectId, name, relativePath, diff, dirty, source, db, redis, preview]): FileTab => ({ id, projectId, name, relativePath, diff, dirty, source, db, redis, preview })), [tabsKey]);
+  const documents = useMemo(() => (JSON.parse(tabsKey) as Array<[string, string, string, string, boolean, boolean, FileSource | null, DbTabRef | null, RedisTabRef | null, boolean, boolean]>)
+    .map(([id, projectId, name, relativePath, diff, dirty, source, db, redis, preview, untitled]): FileTab => ({ id, projectId, name, relativePath, diff, dirty, source, db, redis, preview, untitled })), [tabsKey]);
   const dbConnections = useStore((st) => st.s.dbConnections);
   const dbGroupColors = useStore((st) => st.s.dbGroupColors);
   const dbConnection = (id: string) => dbConnections.find((c) => c.id === id);
@@ -315,12 +316,12 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
       { label: tr('Zamknij wszystkie pliki'), onClick: () => void closeFiles(idsFor('all')) },
       { sep: true }, ...splitMenuItems(doc.id),
       ...detachItem,
-      { sep: true },
-      { label: tr('Kopiuj ścieżkę'), onClick: () => window.mc.clipboardWrite(full) },
+      // An untitled tab has no file yet: nothing to copy or show.
+      ...(doc.untitled ? [] : [{ sep: true as const }, { label: tr('Kopiuj ścieżkę'), onClick: () => window.mc.clipboardWrite(full) }]),
       // A remote file has no local path; a local file outside the projects has no project to be relative to.
-      ...(doc.source ? [] : [{ label: tr('Kopiuj ścieżkę względną'), onClick: () => window.mc.clipboardWrite(doc.relativePath) }]),
-      ...(doc.source?.kind === 'remote' ? [] : [{ label: tr('Pokaż w menedżerze plików'), onClick: () => window.mc.revealPath(full) }]),
-      ...(doc.source ? [] : [{ label: tr('Pokaż w panelu plików'), onClick: () => locateInFiles(doc.projectId, doc.relativePath) }]),
+      ...(doc.source || doc.untitled ? [] : [{ label: tr('Kopiuj ścieżkę względną'), onClick: () => window.mc.clipboardWrite(doc.relativePath) }]),
+      ...(doc.source?.kind === 'remote' || doc.untitled ? [] : [{ label: tr('Pokaż w menedżerze plików'), onClick: () => window.mc.revealPath(full) }]),
+      ...(doc.source || doc.untitled ? [] : [{ label: tr('Pokaż w panelu plików'), onClick: () => locateInFiles(doc.projectId, doc.relativePath) }]),
     ]);
   };
 

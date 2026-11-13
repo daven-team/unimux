@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { CodeEditor } from './CodeEditor';
-import { checkFileOnDisk, closeFile, editFile, fileErrorLabel, fileLabel, isFileDirty, loadDiskText, overwriteFileOnDisk, reloadFileFromDisk, retryFile, saveFile, setFileDataView, setFileMarkdownView, toggleFileWrap, useFileStore } from '../files';
+import { checkFileOnDisk, closeFile, editFile, fileErrorLabel, fileLabel, isFileDirty, loadDiskText, overwriteFileOnDisk, reloadFileFromDisk, retryFile, saveFile, saveFileAs, setFileDataView, setFileMarkdownView, toggleFileWrap, useFileStore } from '../files';
 import { detectDelimiter, isDelimitedPath, parseDelimited, TABLE_VIEW_ROWS } from '../../../shared/csv';
 import { DataTable, ImageView, LargeTextView } from './FileViews';
 import { handleZoomKey, setFileZoom, stepFileZoom, useFileZoom } from '../fileZoom';
@@ -63,6 +63,10 @@ export function FileEditor() {
       if (useFileStore.getState().activeFileId !== doc.id) return;
       if (matchesShortcut('editor.save', event)) {
         event.preventDefault(); event.stopPropagation(); void saveFile(doc.id);
+        return;
+      }
+      if (matchesShortcut('editor.saveAs', event)) {
+        event.preventDefault(); event.stopPropagation(); void saveFileAs(doc.id);
         return;
       }
       // Ctrl+F / Ctrl+H with the keyboard in this tab but outside the text (the toolbar, a notice) or nowhere: find in this file.

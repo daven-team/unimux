@@ -10,7 +10,7 @@ const EXACT = {
   'app:reportError': 'F5', 'app:startupMark': 'F11', 'app:claimStart': 'F11',
   'app:quitAnswer': 'W6', 'app:quitGuard': 'W6', 'app:takeOpenFiles': 'W4',
   // OS integration
-  'attention:flash': 'W4', 'notify': 'W4', 'notify:show': 'W4', 'dialog:pickFolder': 'W4',
+  'attention:flash': 'W4', 'notify': 'W4', 'notify:show': 'W4', 'dialog:pickFolder': 'W4', 'dialog:openFile': 'W4',
   'clipboard:read': 'W4', 'clipboard:write': 'W4', 'clipboard:writeSecret': 'W4',
   'shell:openExternal': 'W4', 'shell:openInEditor': 'W4', 'shell:openPath': 'W4', 'shell:revealPath': 'W4',
   'sound:beep': 'W4', 'sound:load': 'W4', 'sound:pick': 'W4',

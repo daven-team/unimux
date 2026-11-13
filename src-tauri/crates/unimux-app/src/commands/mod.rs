@@ -78,7 +78,7 @@ mod tests {
         assert!(builder.errors().is_empty(), "{:?}", builder.errors());
         let router = builder.build(ctx.guard.clone());
         let report = router.report();
-        assert_eq!(report.len(), 221);
+        assert_eq!(report.len(), 225);
         for channel in [
             "state:load",
             "state:snapshot",

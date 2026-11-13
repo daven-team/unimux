@@ -22,8 +22,8 @@ import { activateWorkspaceKey, currentStrip } from './workspaceStrip';
  * A file tab that can go to its own window: an editor or diff of a project, local or remote file, and (1.0.8) a database or
  * Redis tab. Not a note (it lives in the Notes panel), not a tab that is saving.
  */
-export function canDetachFile(doc: Pick<FileDocument, 'db' | 'redis' | 'source' | 'saving' | 'note'>): boolean {
-  return !doc.note && !doc.saving;
+export function canDetachFile(doc: Pick<FileDocument, 'db' | 'redis' | 'source' | 'saving' | 'note' | 'untitled'>): boolean {
+  return !doc.note && !doc.untitled && !doc.saving; // an untitled tab has no file another window could reopen
 }
 
 function reopenOf(doc: FileDocument): DetachedReopen {

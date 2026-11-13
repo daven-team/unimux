@@ -39,6 +39,11 @@ export interface FileDocument {
   redis?: RedisTabRef;
   /** A note of the Notes panel opened as a tab (1.0.7): its text lives in the state (the note), never on disk and never a draft. */
   note?: { noteId: string };
+  /**
+   * An untitled text tab (File > New text file): its number ('Bez tytułu 1'), projectId '', no file behind it until Save As
+   * binds it to one. Its unsaved text is a draft like any other.
+   */
+  untitled?: number;
   /** Remote text files: the encoding the save writes back (BOM and UTF-16 kept). */
   encoding?: TextEncodingName;
   /** A non-blocking note of the last save (permissions or owner not kept); never stored. */
@@ -109,7 +114,8 @@ function restoreDrafts(): FileDocument[] {
     return value.filter((d): d is FileDocument => d && typeof d.id === 'string' && typeof d.projectId === 'string' && typeof d.relativePath === 'string' && typeof d.name === 'string' && typeof d.text === 'string' && typeof d.savedText === 'string' && typeof d.diskText === 'string'
       // A remote or local draft must still name its file, and its id must be the one that file gets (one tab per file).
       && (d.source === undefined || (validSource(d.source) && d.id === sourceDocumentId(d.source) && d.projectId === ''))
-      && (d.db === undefined || (validDbTabRef(d.db) && d.id === dbTabId(d.db) && d.projectId === '' && d.source === undefined)))
+      && (d.db === undefined || (validDbTabRef(d.db) && d.id === dbTabId(d.db) && d.projectId === '' && d.source === undefined))
+      && (d.untitled === undefined || (Number.isSafeInteger(d.untitled) && d.untitled > 0 && d.id === untitledTabId(d.untitled) && d.projectId === '' && d.source === undefined && d.db === undefined)))
       // No stamps: the first check after a start reads the file again and brings back a conflict notice when the disk moved on.
       // A remote draft keeps the stamp it was opened from: its save compares it with the server file.
       .map((d) => ({
@@ -337,10 +343,101 @@ export async function openLocalFile(path: string): Promise<void> {
   if (created) await retryFile(id);
 }
 
+/**
+ * Any file on this computer in an editor tab, put in front of the window (File > Open file, and the OS: "Open with unimux",
+ * a file association, a file handed to a second instance). A file inside a known project opens as that project's file,
+ * any other one as a local tab that belongs to no project. The same file twice focuses its tab.
+ */
+export async function openExternalFile(absPath: string): Promise<void> {
+  const path = absPath.trim();
+  if (!path) return;
+  setUi({ settingsActive: false, palette: false });
+  await openLocalFile(path);
+}
+
+// ── untitled tabs and Save As ──────────────────────────────────────────────
+
+/** The tab id of untitled tab `n` (a function declaration: restoreDrafts uses it before this module finished loading). */
+export function untitledTabId(n: number): string { return JSON.stringify(['untitled', n]); }
+
+/** File > New text file: an empty untitled tab ('Bez tytułu 1', the lowest free number) in front, with the keyboard in it. */
+export function newUntitledFile(): string {
+  setUi({ settingsActive: false });
+  useSshStore.setState({ viewActive: false });
+  const used = new Set(useFileStore.getState().documents.flatMap((d) => (d.untitled ? [d.untitled] : [])));
+  let n = 1;
+  while (used.has(n)) n++;
+  const id = untitledTabId(n);
+  const name = tr('Bez tytułu {n}', { n: String(n) });
+  const document: FileDocument = { id, projectId: '', relativePath: name, name, untitled: n, text: '', savedText: '', diskText: '', status: 'ready', saving: false, error: null, wrap: false };
+  useFileStore.setState((s) => ({ documents: [...s.documents, document], activeFileId: id }));
+  focusFileEditor(id);
+  return id;
+}
+
+/** True for a tab whose text can be saved under another name (any text tab: a project, local, remote or untitled file). */
+export const canSaveAs = (doc: FileDocument): boolean => doc.status === 'ready' && !doc.diff && !doc.db && !doc.redis && !doc.note;
+
+/**
+ * Save As: the native save dialog picks a file, the tab's text is written there, and the tab then belongs to that file (a
+ * project file when it lies in a project, else a local file); the original file stays as it was on disk. Resolves to the id
+ * of the tab that now holds the text, or null when nothing was saved (cancelled, failed: the error shows in the tab).
+ */
+export async function saveFileAs(id: string): Promise<string | null> {
+  const doc = useFileStore.getState().documents.find((d) => d.id === id);
+  if (!doc || !canSaveAs(doc) || doc.saving) return null;
+  if (doc.preview) keepFile(id);
+  // The file's own line endings (like a save); a new text gets the platform's.
+  const eol = window.mc.platform === 'win32' ? '\r\n' : '\n';
+  const endings = doc.untitled ? [] : doc.diskText.match(/\r\n|\r|\n/g) ?? [];
+  let index = 0;
+  const text = doc.text.replace(/\n/g, () => endings[index++] ?? endings[0] ?? eol);
+  const name = doc.untitled ? `${doc.name}.txt` : doc.name;
+  patch(id, { saving: true, error: null });
+  let result: Awaited<ReturnType<typeof window.mc.localFs.saveAs>>;
+  try { result = await window.mc.localFs.saveAs(name, text); }
+  catch { patch(id, { saving: false, error: fileLabel('failed') }); return null; }
+  patch(id, { saving: false });
+  if (!result.ok) {
+    if (!('canceled' in result)) patch(id, { error: result.error });
+    return null;
+  }
+  return bindSavedTab(id, result.path, doc.text, text);
+}
+
+/** After a Save As: the tab `oldId` becomes the tab of the file at `path` (in its place in the strip). */
+async function bindSavedTab(oldId: string, path: string, saved: string, written: string): Promise<string> {
+  localRead.add(path); // main counts the written file as opened: the tab may save it in place from now on
+  const { caseInsensitive } = localPathRules();
+  const owner = getS().projects.map((p) => ({ p, relative: localRelativePath(p.path, path, caseInsensitive) })).find((x) => x.relative);
+  const newId = owner?.relative ? documentId(owner.p.id, owner.relative.replace(/\\/g, '/')) : sourceDocumentId({ kind: 'local', path });
+  const documents = useFileStore.getState().documents;
+  if (newId === oldId) {
+    // Saved over its own file: the tab is clean against what was written.
+    patch(oldId, { savedText: saved, diskText: written, diskConflict: undefined, externalText: undefined, conflictStamp: undefined, diskStamp: undefined, error: null });
+    return oldId;
+  }
+  const open = documents.some((d) => d.id === newId);
+  if (!open) {
+    update((s) => {
+      const order = s.workspaceOrder && swapOrderKey(s.workspaceOrder, `file:${oldId}`, `file:${newId}`);
+      return order && order !== s.workspaceOrder ? { ...s, workspaceOrder: order } : s;
+    });
+  }
+  loads.delete(oldId);
+  aliases.set(oldId, newId);
+  useFileStore.setState((s) => ({ documents: s.documents.filter((d) => d.id !== oldId), activeFileId: s.activeFileId === oldId ? null : s.activeFileId }));
+  await openLocalFile(path);
+  // A tab of that file that was open already reads the new text (or reports the conflict with its own edits).
+  if (open) void checkFileOnDisk(newId, true);
+  if (owner) refreshGitBadges(owner.p.id, 600);
+  return newId;
+}
+
 const loads = new Map<string, symbol>();
 export async function retryFile(id: string): Promise<void> {
   const doc = useFileStore.getState().documents.find((d) => d.id === id);
-  if (!doc || doc.diff || doc.db || doc.redis || doc.note || isFileDirty(doc) || doc.saving) return;
+  if (!doc || doc.diff || doc.db || doc.redis || doc.note || doc.untitled || isFileDirty(doc) || doc.saving) return;
   const token = Symbol(); loads.set(id, token);
   patch(id, { status: 'loading', error: null });
   try {
@@ -384,6 +481,8 @@ export async function saveFile(id: string): Promise<boolean> {
   const doc = useFileStore.getState().documents.find((d) => d.id === id);
   if (doc?.preview) keepFile(id); // a save keeps the tab, like an edit
   if (!doc || doc.status !== 'ready' || doc.saving || doc.db || doc.redis || doc.note) return false;
+  // An untitled tab has no file yet: Save asks where (the tab then belongs to the chosen file).
+  if (doc.untitled) return (await saveFileAs(id)) !== null;
   if (!isFileDirty(doc)) return true;
   patch(id, { saving: true, error: null });
   try {
@@ -419,7 +518,7 @@ const sameStamp = (a: DiskStamp | undefined, b: DiskStamp): boolean => !!a && a.
  */
 export async function checkFileOnDisk(id: string, force = false): Promise<void> {
   const doc = useFileStore.getState().documents.find((d) => d.id === id);
-  if (!doc || doc.diff || doc.db || doc.redis || doc.note || doc.status !== 'ready' || doc.saving || loads.has(id) || checks.has(id)) return;
+  if (!doc || doc.diff || doc.db || doc.redis || doc.note || doc.untitled || doc.status !== 'ready' || doc.saving || loads.has(id) || checks.has(id)) return;
   if (isRemoteDoc(doc)) {
     // `force`: the user just reconnected the tab.
     if (!force && Date.now() - (remoteChecks.get(id) ?? 0) < REMOTE_CHECK_MS) return;
@@ -458,7 +557,7 @@ export async function checkFileOnDisk(id: string, force = false): Promise<void> 
 /** Every open text tab (on focus and when an agent finished a turn); of the remote ones only the tab on screen. */
 export function checkOpenFilesOnDisk(): void {
   const { documents, activeFileId } = useFileStore.getState();
-  for (const d of documents) if (!d.diff && !d.db && !d.redis && !d.note && d.status === 'ready' && (!isRemoteDoc(d) || d.id === activeFileId)) void checkFileOnDisk(d.id);
+  for (const d of documents) if (!d.diff && !d.db && !d.redis && !d.note && !d.untitled && d.status === 'ready' && (!isRemoteDoc(d) || d.id === activeFileId)) void checkFileOnDisk(d.id);
 }
 /** Conflict choice "Reload": drops the unsaved edits and reads the file again. */
 export async function reloadFileFromDisk(id: string): Promise<void> {
@@ -470,7 +569,7 @@ export async function reloadFileFromDisk(id: string): Promise<void> {
 /** The current disk (or server) text of a tab with the stamp it was read at (a remote file's), or null when unreadable. */
 async function readDiskText(id: string): Promise<{ text: string; stamp?: DiskStamp; encoding?: TextEncodingName } | null> {
   const doc = useFileStore.getState().documents.find((d) => d.id === id);
-  if (!doc) return null;
+  if (!doc || doc.untitled) return null;
   try {
     const { preview: result, stamp, encoding } = await ioOf(doc).read(doc, true);
     if (result.kind !== 'text' || result.truncated) return null;
@@ -511,7 +610,7 @@ export function watchFilesOnDisk(): void {
     // Only while the user looks at the editor: the window has focus and no settings or SSH view covers the tab. Remote tabs are
     // never polled (a check goes over the network): they are checked when they get focus.
     if (active && !document.hidden && document.hasFocus() && !getUi().settingsActive && !useSshStore.getState().viewActive
-      && !documents.some((d) => d.id === active && (isRemoteDoc(d) || d.db || d.redis || d.note))) void checkFileOnDisk(active);
+      && !documents.some((d) => d.id === active && (isRemoteDoc(d) || d.db || d.redis || d.note || d.untitled))) void checkFileOnDisk(active);
   }, ACTIVE_CHECK_MS);
   initRemoteSessions();
   // Hosts of remote tabs with unsaved changes keep their SFTP session while the SFTP view is closed.
@@ -539,12 +638,17 @@ export async function closeFile(id: string): Promise<boolean> {
     if (doc.db || doc.redis) {
       if (dbHooks && !await dbHooks.confirmClose(doc)) return false;
     } else if (isFileDirty(doc)) {
-      const choice = await askChoice(fileLabel('close'), doc.relativePath, [
+      const choice = await askChoice(fileLabel('close'), doc.untitled ? doc.name : doc.relativePath, [
         { label: tr('Zapisz'), value: 'save', primary: true },
         { label: fileLabel('discard'), value: 'discard', danger: true },
       ]);
       if (choice !== 'save' && choice !== 'discard') return false;
-      if (choice === 'save' && (!await saveFile(id) || useFileStore.getState().documents.some((d) => d.id === id && isFileDirty(d)))) return false;
+      if (choice === 'save' && doc.untitled) {
+        // Saved under a new file: that file's tab is the one to close (the untitled tab is gone already).
+        const saved = await saveFileAs(id);
+        if (saved === null) return false;
+        if (saved !== id) { closing.delete(id); return await closeFile(saved); }
+      } else if (choice === 'save' && (!await saveFile(id) || useFileStore.getState().documents.some((d) => d.id === id && isFileDirty(d)))) return false;
     }
     loads.delete(id);
     useFileStore.setState((s) => {

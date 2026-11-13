@@ -10,18 +10,28 @@ export type MenuItem =
   | { header: string }
   | { colors: string[]; onPick: (color: string) => void };
 
-const useMenu = create<{ menu: { x: number; y: number; items: MenuItem[]; returnFocus: HTMLElement | null } | null }>(() => ({ menu: null }));
+/**
+ * owner: who opened the menu (the title bar's menu bar marks its menus, useMenuOwner). onSide: Left / Right while the menu
+ * is open (the menu bar moves to the neighbouring menu).
+ */
+export interface MenuOptions { owner?: string; onSide?: (dir: -1 | 1) => void }
+const useMenu = create<{ menu: { x: number; y: number; items: MenuItem[]; returnFocus: HTMLElement | null; options: MenuOptions } | null }>(() => ({ menu: null }));
 
-export function openMenu(x: number, y: number, items: MenuItem[]): void {
+export function openMenu(x: number, y: number, items: MenuItem[], options: MenuOptions = {}): void {
   const previous = useMenu.getState().menu;
   const focus = document.activeElement;
   const returnFocus = focus instanceof HTMLElement && !focus.closest('.menu') ? focus : previous?.returnFocus ?? null;
-  useMenu.setState({ menu: { x, y, items, returnFocus } });
+  useMenu.setState({ menu: { x, y, items, returnFocus, options } });
 }
 
-export function openMenuAt(el: HTMLElement, items: MenuItem[]): void {
+/** The owner of the open menu (null: none open, or one without an owner). */
+export const useMenuOwner = (): string | null => useMenu((s) => s.menu?.options.owner ?? null);
+export const menuOwner = (): string | null => useMenu.getState().menu?.options.owner ?? null;
+export const closeMenu = (): void => useMenu.setState({ menu: null });
+
+export function openMenuAt(el: HTMLElement, items: MenuItem[], options?: MenuOptions): void {
   const r = el.getBoundingClientRect();
-  openMenu(r.left, r.bottom + 4, items);
+  openMenu(r.left, r.bottom + 4, items, options);
 }
 
 const close = () => useMenu.setState({ menu: null });
@@ -45,6 +55,8 @@ export function ContextMenuHost() {
   useEffect(() => {
     if (!menu) return;
     const onDown = (e: MouseEvent) => {
+      // The menu bar's buttons open, switch and close their menus themselves.
+      if (e.target instanceof Element && e.target.closest('[data-menubar]')) return;
       if (!ref.current?.contains(e.target as Node)) close();
     };
     const onKey = (e: KeyboardEvent) => {
@@ -53,6 +65,12 @@ export function ContextMenuHost() {
         e.stopPropagation();
         close();
         requestAnimationFrame(() => { if (menu.returnFocus?.isConnected) menu.returnFocus.focus({ preventScroll: true }); });
+        return;
+      }
+      if (menu.options.onSide && !e.ctrlKey && !e.altKey && !e.metaKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        e.preventDefault();
+        e.stopPropagation();
+        menu.options.onSide(e.key === 'ArrowLeft' ? -1 : 1);
         return;
       }
       if (e.ctrlKey || e.altKey || e.metaKey || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;

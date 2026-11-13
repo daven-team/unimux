@@ -538,4 +538,9 @@ export interface LocalFilesApi {
   /** 'gone': nothing is there any more (moved, renamed or deleted). */
   statFile(path: string): Promise<{ size: number; mtimeMs: number } | 'gone' | null>;
   writeFile(path: string, text: string, expectedText: string): Promise<{ ok: true } | { ok: false; error: string; code?: 'conflict' }>;
+  /**
+   * Save As: main shows the native save dialog (suggesting `name`) and writes `text` as UTF-8 to the chosen file, which then
+   * counts as opened (writeFile saves it in place). `canceled`: the dialog was closed.
+   */
+  saveAs(name: string, text: string): Promise<{ ok: true; path: string } | { ok: false; canceled: true } | { ok: false; error: string; code?: 'conflict' }>;
 }

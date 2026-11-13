@@ -50,6 +50,13 @@ fn project_path(ctx: &AppContext, id: &Value) -> Option<String> {
     project.get("path")?.as_str().map(str::to_string)
 }
 
+/// The file name a Save As dialog suggests: the tab's name without any folder part, at most 255 characters.
+fn save_as_name(value: &Value) -> String {
+    let name = value.as_str().unwrap_or_default();
+    let name = name.rsplit(['/', '\\']).next().unwrap_or_default().replace('\0', "");
+    name.trim().chars().take(255).collect()
+}
+
 /// Runs blocking file work off the async threads.
 async fn blocking<T: Send + 'static>(command: &str, f: impl FnOnce() -> T + Send + 'static) -> Result<T, IpcError> {
     tauri::async_runtime::spawn_blocking(f).await.map_err(|e| IpcError::failed(command, e.to_string()))
@@ -236,6 +243,29 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
         async move {
             let path = opt_string(call.arg(0));
             blocking(&call.command, move || l.stat_file(path.as_deref())).await
+        }
+    });
+
+    // Save As of an editor tab (an untitled tab, or any text tab): the native save dialog picks the path, never the page.
+    let (l, c) = (local.clone(), ctx.clone());
+    r.invoke("local:saveAs", move |call| {
+        let (l, c) = (l.clone(), c.clone());
+        async move {
+            let Some(os) = c.os.get().cloned() else { return Ok(json!({ "ok": false, "canceled": true })) };
+            let name = save_as_name(call.arg(0));
+            let title = unimux_core::i18n::translate(&crate::commands::os::language(&c.state.get()), "Zapisz jako", &[]);
+            let request = crate::commands::os::SaveRequest { title, default_path: name, filters: Vec::new() };
+            let Some(path) = os.desktop.save(os.dialog_parent(&call.caller.label), request).await else {
+                return Ok(json!({ "ok": false, "canceled": true }));
+            };
+            let text = opt_string(call.arg(1));
+            let ill_formed = call.arg(2) == &Value::Bool(true);
+            let target = path.clone();
+            let result = blocking(&call.command, move || l.save_as(&target, text.as_deref(), ill_formed)).await?;
+            Ok(match result {
+                SaveResult::Ok => json!({ "ok": true, "path": path }),
+                other => other.to_json(),
+            })
         }
     });
 
@@ -478,6 +508,14 @@ mod tests {
             Reply::Json(v) => v,
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn save_as_suggests_a_bare_file_name() {
+        assert_eq!(save_as_name(&json!("Bez tytułu 1")), "Bez tytułu 1");
+        assert_eq!(save_as_name(&json!("C:\\x\\notes.md")), "notes.md");
+        assert_eq!(save_as_name(&json!("/etc/passwd")), "passwd");
+        assert_eq!(save_as_name(&json!(null)), "");
     }
 
     #[test]
