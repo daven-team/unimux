@@ -61,6 +61,7 @@ export function createMcApi(t: McTransport): McApi {
     monitorSample: () => t.invoke('monitor:sample'),
     monitorKill: (pid) => t.invoke('monitor:kill', pid),
     claimAppStart: () => t.invoke('app:claimStart'),
+    takeOpenFiles: () => t.invoke('app:takeOpenFiles'),
     setQuitGuard: (ask) => t.send('app:quitGuard', ask),
     answerQuit: (answer) => t.send('app:quitAnswer', answer),
     reportCellStatus: (cellId, status, reason, hooked, cliEnded, exitCode) => t.send('cell:runtime', cellId, status, reason, hooked, cliEnded, exitCode),

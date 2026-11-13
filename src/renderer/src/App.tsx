@@ -12,6 +12,7 @@ import { initPromptQueue } from './promptQueue';
 import { initAgentPrompt } from './agentPrompt';
 import { initWaitTracking, revealCell } from './waiting';
 import { initTurnTracking } from './turnTimer';
+import { initOpenFromOs } from './openFromOs';
 import { noteAgentTurnEnd } from './turnRefresh';
 import { initBackgroundLoader } from './backgroundLoader';
 import { applyCliStatus, flushPendingSaves, ensureStarted, hasBlockedCells, recheckCli, refreshSessionTitles, resetStarted, releaseCellTerminal, setAliveAtStart } from './actions';
@@ -179,6 +180,8 @@ async function bootRest(mcpInfo: Awaited<ReturnType<typeof window.mc.getMcpInfo>
   // Open editor tabs follow files an agent (or anything else) changed on disk.
   bootStep(watchFilesOnDisk);
   bootStep(initSplitView);
+  // Files opened from Explorer / Finder ("Open with unimux"): the ones that waited for this window, then every later one.
+  bootStep(initOpenFromOs);
   window.mc.on('cell:restarted', (cellId) => { terminals.prepareSpawn(cellId); terminals.syncSize(cellId); });
   window.mc.on('cell:hook', (cellId, event, info) => terminals.hook(cellId, event, info));
   window.mc.on('cell:session', (cellId, session) => {

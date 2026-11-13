@@ -130,6 +130,8 @@ pub struct AppContext {
     /// What runs when the main window's page starts loading (a reload; 1.1.4 `did-start-loading`): the domains drop what
     /// belonged to the old page (G5: the local files it opened).
     pub main_page_hooks: Mutex<Vec<Arc<dyn Fn() + Send + Sync>>>,
+    /// Files the OS asked to open (command line, a second start, Finder), waiting for the main window's renderer.
+    pub open_files: crate::open_files::OpenFiles,
     /// Check build only: not-yet calls and recorded calls for the real-app harness (test_bridge `notYet`, `record`).
     #[cfg(feature = "test-bridge")]
     pub test_record: crate::test_record::TestRecorder,
@@ -259,6 +261,7 @@ impl AppContext {
             #[cfg(feature = "test-bridge")]
             test_marks: Mutex::new(Vec::new()),
             main_page_hooks: Mutex::new(Vec::new()),
+            open_files: Default::default(),
             #[cfg(feature = "test-bridge")]
             test_record: crate::test_record::TestRecorder::from_env(),
             #[cfg(feature = "test-bridge")]

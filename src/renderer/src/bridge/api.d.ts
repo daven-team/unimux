@@ -86,6 +86,8 @@ export interface McApi {
   monitorKill(pid: number): Promise<boolean>;
   /** True only for the first renderer load of this app run (later loads and reloads get false). */
   claimAppStart(): Promise<boolean>;
+  /** Files the OS asked to open (Explorer's "Open with", Finder), each returned once; only the main window gets them. */
+  takeOpenFiles(): Promise<string[]>;
   /** `cliEnded`: the agent CLI ended and its shell is back at the prompt (the terminal process still runs). */
   reportCellStatus(cellId: string, status: CellStatus, reason?: StatusReason, hooked?: boolean, cliEnded?: boolean, exitCode?: number): void;
   /** True while quitting must ask first (an agent is working and the confirmation is on): main then sends 'app:confirm-quit'. */
@@ -300,6 +302,8 @@ export interface McApi {
   on(channel: 'cell:spawnError', cb: (cellId: string, message: string) => void): () => void;
   /** A notice from the main process, already translated (e.g. Claude http hooks found blocked). */
   on(channel: 'app:notice', cb: (text: string) => void): () => void;
+  /** New files from the OS wait to be opened: take them with takeOpenFiles (main window only). */
+  on(channel: 'app:open-files', cb: () => void): () => void;
   on(channel: 'focus-cell', cb: (cellId: string) => void): () => void;
   /** 1.1.1: probe or send a prompt to cells this window holds; answer with agentPromptDone. */
   on(channel: 'agents:prompt:run', cb: (requestId: string, req: AgentPromptRequest) => void): () => void;

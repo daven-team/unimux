@@ -1,7 +1,8 @@
 // CI only (Tauri workflow, job "Update 1.1.4 -> 1.2.0"): installs the published Electron 1.1.4 on a throwaway Windows runner
 // and runs the CI-built 1.2.0 installer over it exactly as 1.1.4's updater does (`--updated /S --force-run`), in the default
 // folder and in a folder of the user's own. Checks: same folder, the Tauri exe in place, the Electron runtime gone, one entry
-// in Apps & features, user data kept, the update window's marker written, and the app really starts.
+// in Apps & features, user data kept, the update window's marker written, the app really starts, and the "Open with" /
+// Default apps / context menu registration exists for the new exe (per user, never HKLM) and is gone after the uninstall.
 //
 //   node scripts/ci-transition-win.mjs <unimux-Setup-1.1.4.exe> <1.2.0 setup.exe>
 //
@@ -35,6 +36,42 @@ const uninstallEntries = () => {
   const text = ps(`@(Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*','HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*' -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like 'unimux*' } | ForEach-Object { $_.DisplayName + ' | ' + $_.DisplayVersion }) -join [char]10`);
   return text ? text.split('\n') : [];
 };
+// A registry value ('' for the default value); '' when the key or the value is missing. -LiteralPath: `*\shell` is a real key.
+const regValue = (hive, key, name = '') =>
+  ps(`$k = Get-Item -LiteralPath '${hive}:\\${key}' -ErrorAction SilentlyContinue; if ($k) { [string]$k.GetValue('${name}') } else { '' }`);
+const regHasValue = (hive, key, name) =>
+  ps(`$k = Get-Item -LiteralPath '${hive}:\\${key}' -ErrorAction SilentlyContinue; if ($k -and ($k.GetValueNames() -contains '${name}')) { '1' } else { '0' }`) === '1';
+const regKeyExists = (hive, key) => ps(`if (Test-Path -LiteralPath '${hive}:\\${key}') { '1' } else { '0' }`) === '1';
+
+// What installer-hooks.nsh registers for opening files from Explorer (UNIMUX_REGISTER_OPEN_WITH).
+const APP_KEY = 'Software\\Classes\\Applications\\unimux.exe';
+const PROGID_KEY = 'Software\\Classes\\unimux.file';
+const VERB_KEY = 'Software\\Classes\\*\\shell\\unimux';
+const CAP_KEY = 'Software\\ajzak, azozowsky\\unimux\\Capabilities';
+
+function assertOpenWithRegistered(exe) {
+  const command = `"${exe}" "%1"`;
+  assert.equal(regValue('HKCU', `${APP_KEY}\\shell\\open\\command`).toLowerCase(), command.toLowerCase(), 'Applications\\unimux.exe opens the file');
+  assert.equal(regValue('HKCU', APP_KEY, 'FriendlyAppName'), 'unimux', 'the name in "Open with"');
+  for (const ext of ['.txt', '.md', '.json', '.ts', '.py']) {
+    assert.ok(regHasValue('HKCU', `${APP_KEY}\\SupportedTypes`, ext), `SupportedTypes lists ${ext}`);
+    assert.ok(regHasValue('HKCU', `Software\\Classes\\${ext}\\OpenWithProgids`, 'unimux.file'), `${ext} offers unimux in "Open with"`);
+    assert.equal(regValue('HKCU', `${CAP_KEY}\\FileAssociations`, ext), 'unimux.file', `Default apps knows ${ext}`);
+    assert.notEqual(regValue('HKCU', `Software\\Classes\\${ext}`), 'unimux.file', `${ext} keeps its own default handler`);
+  }
+  assert.equal(regValue('HKCU', `${PROGID_KEY}\\shell\\open\\command`).toLowerCase(), command.toLowerCase(), 'the ProgID opens the file');
+  assert.equal(regValue('HKCU', 'Software\\RegisteredApplications', 'unimux'), CAP_KEY, 'unimux is a registered application');
+  assert.equal(regValue('HKCU', `${VERB_KEY}\\command`).toLowerCase(), command.toLowerCase(), 'the context menu entry opens the file');
+  assert.ok(regValue('HKCU', VERB_KEY, 'MUIVerb').includes('unimux'), 'the context menu entry has its text');
+  // A per-user install never writes the machine's classes.
+  for (const key of [APP_KEY, PROGID_KEY, VERB_KEY]) assert.ok(!regKeyExists('HKLM', key), `nothing in HKLM\\${key}`);
+}
+
+const openWithGone = () =>
+  [APP_KEY, PROGID_KEY, VERB_KEY, CAP_KEY].every((key) => !regKeyExists('HKCU', key))
+  && !regHasValue('HKCU', 'Software\\Classes\\.md\\OpenWithProgids', 'unimux.file')
+  && !regHasValue('HKCU', 'Software\\RegisteredApplications', 'unimux');
+
 const running = (exe) => ps(`@(Get-CimInstance Win32_Process -Filter "Name='unimux.exe'" | Where-Object { $_.ExecutablePath -eq '${exe}' }).Count`);
 
 async function waitFor(what, test, ms = 60000) {
@@ -85,6 +122,8 @@ async function round(name, dir, oldArgs, newDir = dir) {
   assert.match(entries[0], /1\.2\.0/);
   assert.equal(readFileSync(marker, 'utf8'), content, 'user data kept');
   await waitFor('the marker for the update window', () => existsSync(join(dataDir, 'update', 'installer-done')));
+  assertOpenWithRegistered(newExe);
+  console.log('"Open with", Default apps and the context menu are registered');
 
   // --force-run starts the new app: it has to be there, and stay there.
   await waitFor('the app started by --force-run', () => Number(running(newExe)) > 0);
@@ -101,6 +140,7 @@ async function round(name, dir, oldArgs, newDir = dir) {
   await sleep(2000);
   install(join(newDir, 'uninstall.exe'), ['/S']);
   await waitFor('uninstalled', () => uninstallEntries().length === 0, 120000);
+  await waitFor('the "Open with" registration removed', openWithGone, 60000);
   // Tauri's silent uninstaller keeps its install-location key. The next round is a machine that never had 1.2.0.
   ps(`Remove-Item -LiteralPath 'HKCU:\\Software\\ajzak, azozowsky' -Recurse -Force -ErrorAction SilentlyContinue`);
 }
