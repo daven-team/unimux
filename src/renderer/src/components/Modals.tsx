@@ -6,6 +6,7 @@ import {
   deleteArchived, getProfile, PROJECT_COLORS, removeSnippet, uid, updateProject, upsertSnippet,
 } from '../../../shared/state';
 import { fuzzyFilter } from '../../../shared/fuzzy';
+import { splitAddress } from '../../../shared/linkTrust';
 import type { ProjectIcon, SessionInfo, Snippet } from '../../../shared/types';
 import { restoreArchived, resumeSession } from '../actions';
 import { closeDialog, closeModal, setUi, update, useStore, type Dialog } from '../store';
@@ -114,7 +115,11 @@ function DialogView({ dialog }: { dialog: Dialog }) {
     <div className={`modal${dialog.groups ? ' uw-dialog' : ''}`} style={{ width: dialog.groups ? 520 : 460 }}>
       <div className="modal-head"><h3>{dialog.title}</h3></div>
       <div className="modal-body">
-        <div className="muted" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{dialog.body}</div>
+        {dialog.url && (() => {
+          const part = splitAddress(dialog.url);
+          return <div className="dialog-url">{part.before}<b>{part.host}</b>{part.after}</div>;
+        })()}
+        {dialog.body && <div className="muted" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{dialog.body}</div>}
         {dialog.groups && dialog.groups.length > 0 && (
           <ul className="uw-groups">
             {dialog.groups.map((g) => (
@@ -134,10 +139,14 @@ function DialogView({ dialog }: { dialog: Dialog }) {
         )}
       </div>
       <div className="modal-foot">
+        {dialog.actions.filter((a) => a.side === 'left').map((a) => (
+          <button key={a.value} title={a.title} data-value={a.value} className="btn ghost foot-left" onClick={() => dialog.onChoose(a.value, checked)}>{a.label}</button>
+        ))}
         <button className="btn" onClick={closeDialog}>{dialog.cancelLabel ?? tr("Anuluj")}</button>
-        {dialog.actions.map((a) => (
+        {dialog.actions.filter((a) => a.side !== 'left').map((a) => (
           <button key={a.value} autoFocus={a.primary} title={a.title} data-value={a.value} className={`btn ${a.danger ? 'danger' : ''} ${a.primary ? 'primary' : ''}`} onClick={() => dialog.onChoose(a.value, checked)}>
             {a.label}
+            {a.hint && <span className="btn-key">{a.hint}</span>}
           </button>
         ))}
       </div>

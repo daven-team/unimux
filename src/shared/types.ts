@@ -218,6 +218,8 @@ export interface Settings {
   shortcuts: ShortcutOverrides;
   /** Ask before closing a grid, a cell or the app while a Claude or Codex cell is working ("do not ask again" turns it off). */
   confirmCloseWorking: boolean;
+  /** 1.2.5: hosts (with port) whose terminal links open without asking ("Nie pytaj więcej o ten adres"; shared/linkTrust.ts). */
+  trustedLinkHosts?: string[];
   /** Lines of history each terminal keeps (one of SCROLLBACK_CHOICES, shared/terminalLimits.ts). */
   scrollbackLines: number;
   /** Colour theme of SSH terminals (Settings > SSH); a host may choose its own (shared/sshThemes.ts). */

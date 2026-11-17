@@ -1242,3 +1242,14 @@ html[data-window-shown="false"] *, html[data-window-shown="false"] *::before, ht
 .sidebar-content.os-dragging .side-list { outline: 2px dashed var(--accent); outline-offset: -4px; border-radius: 6px; background: var(--accent-soft); }
 .project-group.folder-head.os-drop > .project { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--accent-soft); }
 .project-os-drop { position: absolute; left: 12px; right: 12px; bottom: 12px; padding: 8px 10px; border-radius: 6px; background: #0d1a2bf0; border: 1px solid var(--accent); color: #cfe0ff; font-size: 12px; text-align: center; pointer-events: none; }
+
+/* ── 1.2.5: dialog buttons without a second ring, the link question's address box, trusted link hosts ── */
+.modal-foot .btn:focus-visible { outline: none; box-shadow: inset 0 0 0 1px #ffffff55; }
+.modal-foot .btn.primary:focus-visible { background: var(--btn-primary-bg-hover); box-shadow: inset 0 0 0 1px #ffffff70; }
+.modal-foot .foot-left { margin-right: auto; }
+.btn-key { margin-left: 8px; padding: 0 4px; border-radius: 3px; font-size: 10.5px; font-weight: 500; background: #00000022; opacity: .75; }
+.dialog-url { margin: 2px 0 12px; padding: 8px 10px; border: 1px solid var(--border-2); border-radius: 6px; background: #141414; font: 12px/1.5 Consolas, 'Cascadia Mono', monospace; color: #9a9a9a; word-break: break-all; user-select: text; }
+.dialog-url b { color: #f0f0f0; font-weight: 600; }
+.trusted-hosts { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; max-width: 360px; }
+.trusted-host { display: inline-flex; align-items: center; gap: 2px; padding: 1px 2px 1px 8px; border: 1px solid var(--border-2); border-radius: 999px; background: #1e1e1e; font: 11.5px Consolas, monospace; color: var(--text); }
+.trusted-host .btn.icon { width: 18px; height: 18px; padding: 0; }

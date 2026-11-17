@@ -21,6 +21,7 @@ import { DEFAULT_SCROLLBACK_LINES, normalizeScrollback, SCROLLBACK_CHOICES } fro
 import { normalizeStripScope } from '../../../shared/workspaceOrder';
 import { searchText, settingsSearchMatches } from '../../../shared/settingsSearch';
 import { ISearch, IX, TSettings } from './icons';
+import { trustedHosts, withoutTrustedHost } from '../../../shared/linkTrust';
 import { SshSettings } from './ssh/SshSettings';
 import { delegationOf, MAX_AGENTS_MAX, MAX_AGENTS_MIN, normalizeDelegation, normalizeMaxAgents } from '../../../shared/delegation';
 
@@ -136,6 +137,19 @@ export function SettingsPage() {
           </SettingRow>
           <SettingRow title={tr('Pytaj przed zamknięciem pracujących agentów')} htmlFor="settings-confirm-close" hint={tr('Zamknięcie zakładki, komórki lub aplikacji, gdy agent Claude lub Codex jest w trakcie tury, najpierw pyta o potwierdzenie.')}>
             <input id="settings-confirm-close" className="setting-switch" type="checkbox" role="switch" checked={settings.confirmCloseWorking} onChange={(e) => setSetting({ confirmCloseWorking: e.target.checked })} />
+          </SettingRow>
+          {/* 1.2.5: hosts whose terminal links open without asking ("Nie pytaj więcej o ten adres"). */}
+          <SettingRow title={tr('Linki otwierane bez pytania')} hint={trustedHosts(settings.trustedLinkHosts).length
+            ? tr('Linki z tych adresów otwierają się z terminala od razu. Usuń adres, aby znów pytać.')
+            : tr('Brak. Zaznacz „Nie pytaj więcej o ten adres”, otwierając link z terminala.')}>
+            <div className="trusted-hosts">
+              {trustedHosts(settings.trustedLinkHosts).map((host) => (
+                <span key={host} className="trusted-host">{host}
+                  <button className="btn ghost icon" title={tr('Usuń {host}', { host })} aria-label={tr('Usuń {host}', { host })}
+                    onClick={() => setSetting({ trustedLinkHosts: withoutTrustedHost(settings.trustedLinkHosts, host) })}><IX /></button>
+                </span>
+              ))}
+            </div>
           </SettingRow>
           <SettingRow title={tr('Karty na górnym pasku')} htmlFor="settings-strip-scope" hint={tr(settings.stripScope === 'project'
             ? 'Pasek pokazuje tylko gridy i pliki aktywnego projektu (oraz karty spoza projektów). Wybór innego projektu po lewej pokazuje jego karty.'

@@ -44,9 +44,12 @@ export type Dialog = { id: number } & (
       kind: 'confirm';
       title: string;
       body: string;
-      actions: Array<{ label: string; value: string; danger?: boolean; primary?: boolean; title?: string }>;
+      /** side 'left': the button sits at the left of the footer (1.2.5, "Kopiuj"); hint: a key shown on the button. */
+      actions: Array<{ label: string; value: string; danger?: boolean; primary?: boolean; title?: string; side?: 'left'; hint?: string }>;
       /** A checkbox under the text (for example "do not ask again"); its state comes with the choice. */
       check?: string;
+      /** 1.2.5: an address shown in a box under the title, its host in bold (the link question). */
+      url?: string;
       /** 1.1.2: a grouped list under the text (the update question: what would be interrupted, with the cell names). */
       groups?: DialogGroup[];
       /** The label of the button that closes the dialog without a choice (default "Anuluj"). */
@@ -255,14 +258,15 @@ export function askChoice(
 /** askChoice with a checkbox: resolves with the chosen value (null when cancelled) and whether the box was ticked. */
 export function askChoiceChecked(
   title: string, body: string,
-  actions: Array<{ label: string; value: string; danger?: boolean; primary?: boolean }>,
+  actions: Array<{ label: string; value: string; danger?: boolean; primary?: boolean; side?: 'left'; hint?: string }>,
   check: string,
+  extra: { url?: string } = {},
 ): Promise<{ value: string | null; checked: boolean; replaced?: true }> {
   const id = replaceOpenDialog();
   return new Promise((resolve) => {
     setUi({
       dialog: {
-        id, kind: 'confirm', title, body, actions, check,
+        id, kind: 'confirm', title, body, actions, check, ...extra,
         onChoose: (value, checked) => {
           pendingPrompt = null;
           setUi({ dialog: null });
