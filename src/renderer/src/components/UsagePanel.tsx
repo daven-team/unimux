@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { updateSettings } from '../../../shared/state';
 import type { AccountNotice, LoginTarget } from '../../../shared/accounts';
-import { adoptCopyOffered, cardState, claudeLoginActions, diagnosticLabel, effectivePercent, formatDuration, makeMainOffered, shortAccountName, shortDuration, summaryAccounts, usageBand, usageDiagnostics, usageErrorKind, usageSummary, type ProviderUsage, type SetAsideAccount, type UsageProvider, type UsageWindow } from '../../../shared/usage';
+import { adoptCopyOffered, cardState, claudeLoginActions, diagnosticLabel, effectivePercent, formatDuration, makeMainOffered, shortAccountName, shortDuration, summaryAccounts, usageBand, usageDiagnostics, usageErrorKind, usageSummary, withoutRemovedCards, removedCardKey, type ProviderUsage, type SetAsideAccount, type UsageProvider, type UsageWindow } from '../../../shared/usage';
 import { cswapNoteText, noticeText, setAsideText, usageErrorKey } from '../../../shared/usageMessages';
 import { useI18n } from '../i18n';
 import { swapErrorKey, swapErrorText } from '../../../shared/swapMessages';
@@ -115,8 +115,27 @@ function KebabIcon() {
   return <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden><circle cx="8" cy="3.5" r="1.2" /><circle cx="8" cy="8" r="1.2" /><circle cx="8" cy="12.5" r="1.2" /></svg>;
 }
 
-function AccountCard({ usage, now, language, showMain, savedIndex, swapping, onMakeMain, onSwitchBest }: {
+/** 1.2.5: the keys of the expired main-login cards taken off the panel (removedCardKey), remembered across restarts. */
+const REMOVED_CARDS_KEY = 'mc.usage.removedCards';
+function readRemovedCards(): string[] {
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(REMOVED_CARDS_KEY) ?? '[]');
+    return Array.isArray(raw) ? raw.filter((k): k is string => typeof k === 'string').slice(0, 50) : [];
+  } catch { return []; }
+}
+function useRemovedCards(): [string[], (next: string[]) => void] {
+  const [removed, setRemoved] = useState(readRemovedCards);
+  const save = useCallback((next: string[]) => {
+    setRemoved(next);
+    try { localStorage.setItem(REMOVED_CARDS_KEY, JSON.stringify(next)); } catch { /* kept for this run */ }
+  }, []);
+  return [removed, save];
+}
+
+function AccountCard({ usage, now, language, showMain, savedIndex, swapping, onMakeMain, onSwitchBest, onRemoveCard }: {
   usage: ProviderUsage; now: number; language: string; showMain: boolean;
+  /** 1.2.5: takes the card of an expired main login off the panel (the login itself is not the app's to delete). */
+  onRemoveCard?: (usage: ProviderUsage) => void;
   /** Position among the saved Claude accounts (1-based); names the account in diagnostics instead of its e-mail. */
   savedIndex: number;
   /** Account id whose swap is running (any card is locked meanwhile), or null. */
@@ -144,6 +163,15 @@ function AccountCard({ usage, now, language, showMain, savedIndex, swapping, onM
     );
     if (choice !== 'yes') return;
     await removeSaved(recordId(usage), tr, usage.provider);
+  };
+  // 1.2.5: an expired main login (Claude Code's or Codex CLI's own) offers "Usuń konto" too, like a saved account: its card goes.
+  const removeCard = async () => {
+    const choice = await askChoice(
+      tr('Usunąć konto {name}?', { name }),
+      tr('Karta zniknie z panelu. Samo logowanie pozostaje bez zmian, a karta wróci, gdy zalogujesz się ponownie.'),
+      [{ label: tr('Usuń konto'), value: 'yes', danger: true }],
+    );
+    if (choice === 'yes') onRemoveCard?.(usage);
   };
 
   // "Renew this copy in unimux": only after the user confirms; the main process checks the record again.
@@ -245,7 +273,8 @@ function AccountCard({ usage, now, language, showMain, savedIndex, swapping, onM
               ...(canAdopt ? [{ label: tr(ADOPT_LABEL), disabled: busy, onClick: () => void adoptCopy() }] : []),
               ...(canRelogin ? [{ label: tr('Zaloguj ponownie to konto'), disabled: busy, onClick: () => openAuth(usage.provider, reloginTarget(usage)) }] : []),
               { label: tr('Skopiuj diagnostykę'), onClick: copyDiagnostics },
-              ...(usage.managed ? [{ label: tr('Usuń konto'), danger: true, disabled: busy, onClick: () => void removeAccount() }] : []),
+              ...(usage.managed ? [{ label: tr('Usuń konto'), danger: true, disabled: busy, onClick: () => void removeAccount() }]
+                : expired && onRemoveCard ? [{ label: tr('Usuń konto'), danger: true, onClick: () => void removeCard() }] : []),
             ])}
           ><KebabIcon /></button>
         )}
@@ -323,6 +352,11 @@ export function UsagePanel() {
   const [swapPending, setSwapPending] = useState(false);
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  const [removedCards, setRemovedCards] = useRemovedCards();
+  const removedView = withoutRemovedCards(providers, removedCards);
+  // A removed card whose login works again (or that another account signed in to) is forgotten, so it shows next time too.
+  const staleRemoved = providers.length > 0 && removedView.removed.length !== removedCards.length;
+  useEffect(() => { if (staleRemoved) setRemovedCards(removedView.removed); }, [staleRemoved, removedView.removed, setRemovedCards]);
   // An interrupted swap blocks further swaps until the user has checked the accounts and cleared the warning.
   useEffect(() => {
     void window.mc.swapPending().then((pending) => { if (alive.current) setSwapPending(pending); }).catch(() => undefined);
@@ -330,7 +364,7 @@ export function UsagePanel() {
   }, []);
   if (!settings.showAiUsage) return null;
 
-  const visible = providers.filter((usage) => usage.status !== 'signedOut');
+  const visible = removedView.cards.filter((usage) => usage.status !== 'signedOut');
   const shown = summaryAccounts(providers);
   const refresh = async () => {
     setRefreshing(true);
@@ -552,7 +586,7 @@ export function UsagePanel() {
           <AccountNotices notices={notices} setAside={setAside} copies={duplicateCopies} readOnlyPath={accountsReadOnly} />
           {visible.length ? (
             <>
-              {visible.map((usage) => <AccountCard key={usage.accountId} usage={usage} savedIndex={visible.filter((u) => u.managed && u.provider === usage.provider).indexOf(usage) + 1} now={now} language={language} showMain={(usage.provider === 'claude' ? claudeCount : codexCount) > 1} swapping={swapping} onMakeMain={(target) => void makeMain(target)} {...(switchOffered(usage) ? { onSwitchBest: () => void switchBest(usage.provider) } : {})} />)}
+              {visible.map((usage) => <AccountCard key={usage.accountId} usage={usage} savedIndex={visible.filter((u) => u.managed && u.provider === usage.provider).indexOf(usage) + 1} now={now} language={language} showMain={(usage.provider === 'claude' ? claudeCount : codexCount) > 1} swapping={swapping} onMakeMain={(target) => void makeMain(target)} onRemoveCard={(target) => setRemovedCards([...removedCards, removedCardKey(target)])} {...(switchOffered(usage) ? { onSwitchBest: () => void switchBest(usage.provider) } : {})} />)}
               {updated && <p className="usage-note">{tr('Zaktualizowano {time}', { time: updated })}</p>}
             </>
           ) : (

@@ -255,3 +255,21 @@ export function usageDiagnostics(usage: ProviderUsage, nowMs: number, label: str
     `windows: ${usage.windows.length ? usage.windows.map((w) => `${w.id} ${Math.round(w.usedPercent)}%`).join(', ') : 'none'}`,
   ].join('\n');
 }
+
+/**
+ * 1.2.5: "Usuń konto" on the card of an expired main login (Claude Code's or Codex CLI's own sign-in, which the app does not
+ * own and never deletes) takes the card off the panel. The key names the account and its e-mail, so the card comes back as
+ * soon as that login works again or another account signs in there.
+ */
+export const removedCardKey = (u: Pick<ProviderUsage, 'accountId' | 'email'>): string => `${u.accountId}|${u.email ?? ''}`;
+
+/** The cards to show, and the removed keys still worth keeping (a key whose login works again, or holds another account, goes). */
+export function withoutRemovedCards(list: ProviderUsage[], removed: readonly string[]): { cards: ProviderUsage[]; removed: string[] } {
+  const keys = new Set(removed);
+  const cards = list.filter((u) => !(keys.has(removedCardKey(u)) && cardState(u) === 'expired'));
+  const kept = removed.filter((key) => {
+    const card = list.find((u) => key.startsWith(`${u.accountId}|`));
+    return !card || (removedCardKey(card) === key && cardState(card) === 'expired');
+  });
+  return { cards, removed: kept };
+}

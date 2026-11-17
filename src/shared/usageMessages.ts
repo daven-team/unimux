@@ -7,6 +7,7 @@ export const usageMessages = {
   '7 dni': ['7 days', '7 Tage', '7 días', '7 jours', '7 dias'],
   'reset {time}': ['resets {time}', 'Reset {time}', 'reinicio {time}', 'réinit. {time}', 'reinício {time}'],
   'za {time}': ['in {time}', 'in {time}', 'en {time}', 'dans {time}', 'em {time}'],
+  'Karta zniknie z panelu. Samo logowanie pozostaje bez zmian, a karta wróci, gdy zalogujesz się ponownie.': ['The card leaves the panel. The sign-in itself stays as it is, and the card comes back when you sign in again.', 'Die Karte verschwindet aus dem Bereich. Die Anmeldung selbst bleibt unverändert, und die Karte kehrt zurück, wenn du dich erneut anmeldest.', 'La tarjeta desaparece del panel. El inicio de sesión no cambia y la tarjeta vuelve cuando inicies sesión de nuevo.', 'La carte quitte le panneau. La connexion elle-même ne change pas et la carte revient lorsque vous vous reconnectez.', 'O cartão sai do painel. O início de sessão fica como está e o cartão volta quando voltar a iniciar sessão.'],
   'Zaktualizowano {time}': ['Updated {time}', 'Aktualisiert {time}', 'Actualizado {time}', 'Mis à jour {time}', 'Atualizado {time}'],
   'Odśwież limity': ['Refresh limits', 'Limits aktualisieren', 'Actualizar límites', 'Actualiser les limites', 'Atualizar limites'],
   'Zwiń konta i limity': ['Collapse accounts & limits', 'Konten und Limits einklappen', 'Contraer cuentas y límites', 'Réduire comptes et limites', 'Recolher contas e limites'],
