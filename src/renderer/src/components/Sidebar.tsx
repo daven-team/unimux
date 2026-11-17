@@ -111,7 +111,7 @@ export function Sidebar({ resize }: { resize: PanelResizeProps }) {
       {content?.kind === 'panel' && (
         <div className="side-panel" id={`sidebar-${active.id}`} role="tabpanel" aria-labelledby={`${active.id}-view`}>
           <PanelResizeHandle {...resize} />
-          <div className="side-panel-title">{tr(active.label)}</div>
+          <div className="side-panel-title">{tr(active.label)}{active.actions && <active.actions />}</div>
           {contentElement}
           {usage}
         </div>

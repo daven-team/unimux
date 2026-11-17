@@ -572,12 +572,14 @@ export function toggleMaximize(cellId?: string): void {
 // ── projects ────────────────────────────────────────────────────────────────
 
 /** A new project folder at the end of the Projects panel (shown if hidden), named right away. Returns its id. */
-export async function createProjectFolder(): Promise<string> {
-  const name = tr('Nowy folder');
-  let id = '';
-  update((s) => { const r = addFolder({ ...s, sidebarCollapsed: false }, name); id = r.folderId; return r.state; });
+/** 1.2.5: the name is asked first; a cancelled dialog makes no folder (an empty "Nowy folder" stayed behind before). */
+export async function createProjectFolder(): Promise<string | null> {
+  update((s) => ({ ...s, sidebarCollapsed: false }));
   setUi({ sidebarView: 'projects' });
-  await renameProjectFolder(id, name);
+  const name = (await askText(tr('Nazwa folderu'), tr('Nowy folder')))?.trim();
+  if (!name) return null;
+  let id = '';
+  update((s) => { const r = addFolder(s, name); id = r.folderId; return r.state; });
   return id;
 }
 
@@ -591,11 +593,15 @@ export async function createProject(): Promise<void> {
   if (path) addProjectFolder(path);
 }
 
-/** Adds a folder as a project and makes it the active one (a folder that already is a project is just switched to). */
-export function addProjectFolder(path: string): void {
+/**
+ * Adds a folder as a project and makes it the active one (a folder that already is a project is just switched to).
+ * Returns the project's id.
+ */
+export function addProjectFolder(path: string): string {
   const existing = getS().projects.find((p) => normalizeProjectPath(p.path) === normalizeProjectPath(path));
-  if (existing) return switchProject(existing.id);
+  if (existing) { switchProject(existing.id); return existing.id; }
   update((s) => addProject(s, { name: basename(path), path }));
+  return getS().activeProjectId ?? '';
 }
 
 export function switchProject(projectId: string): void {

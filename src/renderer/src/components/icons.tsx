@@ -23,6 +23,8 @@ export const IGrip = () => <Svg size={12}><path d="M5 4h.01M10 4h.01M5 8h.01M10 
 export const ISnippet = () => <Svg><path d="M5 4L1.5 8 5 12M11 4l3.5 4-3.5 4M9.5 3l-3 10" /></Svg>;
 export const ISplit = () => <Svg><rect x="2" y="3" width="12" height="10" rx="1.5" /><path d="M8 3v10M3.8 6h2.4M3.8 8.5h2.4" /></Svg>;
 export const ISidebar = () => <Svg><rect x="2" y="3" width="12" height="10" rx="1.5" /><path d="M6 3v10" /></Svg>;
+/** 1.2.5: a folder with a plus (the Projects panel header's "Nowy folder"). */
+export const INewFolder = () => <Svg><path d="M8.5 13H3.5A1.5 1.5 0 0 1 2 11.5v-7A1.5 1.5 0 0 1 3.5 3h3l1.5 1.5h4.5A1.5 1.5 0 0 1 14 6v2" /><path d="M12.5 10v5M10 12.5h5" /></Svg>;
 export const ICollapseAll = () => <Svg><path d="M4 3.5l4 3.5 4-3.5M4 12.5L8 9l4 3.5" /></Svg>;
 export const IExpandAll = () => <Svg><path d="M4 7l4-3.5L12 7M4 9l4 3.5L12 9" /></Svg>;
 export const ISearch = () => <Svg><circle cx="7" cy="7" r="4.5" /><path d="M10.5 10.5L14 14" /></Svg>;

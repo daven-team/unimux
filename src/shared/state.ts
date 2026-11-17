@@ -8,6 +8,7 @@ import { defaultShell, shellsForPlatform, type AppPlatform } from './platform';
 import { normalizePanelWidth, PANEL_LIMITS } from './panels';
 import { normalizePathMode } from './pathDrop';
 import { defaultAutomation, pruneAutomation } from './automation';
+import { pruneEmptiedFolders } from './projectFolders';
 import { USAGE_INTERVALS_MINUTES } from './usage';
 import { defaultAlerts, LEGACY_ALERT_KEYS, readAlerts } from './alerts';
 import { defaultAutoSwitch, normalizeAutoSwitch } from './autoSwitch';
@@ -138,7 +139,8 @@ export function removeProject(s: AppState, id: string): AppState {
     s.activeProjectId === id ? (projects[Math.min(idx, projects.length - 1)]?.id ?? null) : s.activeProjectId;
   // The project's tasks, messages and activity go with it (they no longer count anywhere and nothing can show them).
   const automation = pruneAutomation(s.automation, new Set(projects.map((p) => p.id)), Date.now());
-  return { ...s, projects, activeProjectId, automation };
+  // 1.2.5: the folder it was the last project of goes with it.
+  return pruneEmptiedFolders(s, { ...s, projects, activeProjectId, automation });
 }
 
 export type DropEdge = 'before' | 'after';

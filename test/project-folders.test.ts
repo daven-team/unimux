@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { defaultState } from '../src/shared/state';
-import { addFolder, dropOnProject, flatProjectIds, moveTreeItem, projectTree, removeFolder, updateFolder } from '../src/shared/projectFolders';
+import { defaultState, removeProject } from '../src/shared/state';
+import { addFolder, dropOnProject, flatProjectIds, moveTreeItem, newFolderWith, projectTree, removeFolder, setFoldersCollapsed, updateFolder } from '../src/shared/projectFolders';
 import type { AppState, Project } from '../src/shared/types';
 
 const proj = (id: string): Project => ({ id, name: id, path: `C:\\${id}`, color: '#3b82f6', tabs: [], archive: [], activeTabId: null });
@@ -24,13 +24,17 @@ describe('project folders', () => {
     expect(s.projects.map((p) => p.id)).toEqual(['b', 'd', 'c', 'a']);
   });
 
-  it('keeps an emptied folder, removes a folder without removing its projects, and keeps folders one level deep', () => {
+  it('keeps a new empty folder, drops a folder its last project left, removes a folder without its projects, one level deep', () => {
     let s = state('a', 'b');
-    const made = addFolder(s, 'Prywatne');
-    s = moveTreeItem(made.state, 'b', { kind: 'into', folderId: made.folderId });
+    const first = addFolder(s, 'Pusty');
+    expect(shape(first.state)).toEqual(['a', 'b', 'Pusty[]']);
+    // 1.2.5: the last project moved out takes its folder with it.
+    s = moveTreeItem(first.state, 'b', { kind: 'into', folderId: first.folderId });
+    expect(shape(s)).toEqual(['a', 'Pusty[b]']);
     s = moveTreeItem(s, 'b', { kind: 'before', id: 'a' });
-    expect(shape(s)).toEqual(['b', 'a', 'Prywatne[]']);
-    s = moveTreeItem(s, 'a', { kind: 'into', folderId: made.folderId });
+    expect(shape(s)).toEqual(['b', 'a']);
+    const made = addFolder(s, 'Prywatne');
+    s = moveTreeItem(made.state, 'a', { kind: 'into', folderId: made.folderId });
     // A folder dropped next to a project inside a folder goes next to that folder, never inside.
     const other = addFolder(s, 'X');
     s = moveTreeItem(other.state, other.folderId, { kind: 'before', id: 'a' });
@@ -40,6 +44,40 @@ describe('project folders', () => {
     s = removeFolder(s, made.folderId);
     expect(shape(s)).toEqual(['b', 'X[]', 'a']);
     expect(s.projects).toHaveLength(2);
+  });
+
+  it('drops a folder emptied by taking its last project out, dropping it onto another project or removing it from the list', () => {
+    let s = dropOnProject(state('a', 'b', 'c'), 'b', 'a', 'F').state;
+    expect(shape(s)).toEqual(['F[a,b]', 'c']);
+    const f = s.projectFolders![0].id;
+    s = moveTreeItem(s, 'b', { kind: 'after', id: f });
+    expect(shape(s)).toEqual(['F[a]', 'b', 'c']);
+    // "Wyjmij z folderu" of the last one: the project takes the folder's place.
+    s = moveTreeItem(s, 'a', { kind: 'after', id: f });
+    expect(shape(s)).toEqual(['a', 'b', 'c']);
+    // Dropped onto another project: a new folder there, the old one goes.
+    s = dropOnProject(state('a', 'b', 'c'), 'b', 'a', 'F').state;
+    s = moveTreeItem(s, 'a', { kind: 'end' });
+    s = dropOnProject(s, 'b', 'c', 'G').state;
+    expect(shape(s)).toEqual(['G[c,b]', 'a']);
+    // Removed from the list: the folder it was the last project of goes, its other folders stay.
+    s = removeProject(removeProject(s, 'c'), 'b');
+    expect(shape(s)).toEqual(['a']);
+    expect(s.projectFolders).toEqual([]);
+  });
+
+  it('makes a new folder with a project at its place, and folds or unfolds every folder at once', () => {
+    let s = newFolderWith(state('a', 'b', 'c'), 'b', 'F').state;
+    expect(shape(s)).toEqual(['a', 'F[b]', 'c']);
+    // From inside a folder: the new one goes right after it, and the emptied one goes.
+    s = newFolderWith(s, 'b', 'G').state;
+    expect(shape(s)).toEqual(['a', 'G[b]', 'c']);
+    s = moveTreeItem(s, 'c', { kind: 'into', folderId: s.projectFolders![0].id });
+    s = newFolderWith(s, 'c', 'H').state;
+    expect(shape(s)).toEqual(['a', 'G[b]', 'H[c]']);
+    s = setFoldersCollapsed(s, true);
+    expect(s.projectFolders!.every((f) => f.collapsed)).toBe(true);
+    expect(setFoldersCollapsed(s, false).projectFolders!.some((f) => f.collapsed)).toBe(false);
   });
 
   it('repairs folder data a version without folders left stale: unknown ids dropped, duplicates in the first folder, new projects last', () => {

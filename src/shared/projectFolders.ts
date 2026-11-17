@@ -89,6 +89,24 @@ function take(tree: TreeItem[], id: string): { rest: TreeItem[]; item: TreeItem 
   return { rest, item };
 }
 
+/**
+ * 1.2.5: a folder whose last project left it (moved out, dropped elsewhere or removed from the list) goes with it. A folder
+ * that was already empty (just made with "Nowy folder") stays until something is put in it.
+ */
+function dropEmptied(before: TreeItem[], after: TreeItem[]): TreeItem[] {
+  const held = new Set(before.flatMap((i) => (i.kind === 'folder' && i.projects.length ? [i.folder.id] : [])));
+  return after.filter((i) => !(i.kind === 'folder' && !i.projects.length && held.has(i.folder.id)));
+}
+
+/** After projects were removed from the list (`before` → `after`): the folders they emptied go too. */
+export function pruneEmptiedFolders<S extends AppState>(before: S, after: S): S {
+  if (!before.projectFolders?.length) return after;
+  const prev = projectTree(before);
+  const next = projectTree(after);
+  const kept = dropEmptied(prev, next);
+  return kept.length === next.length ? after : withTree(after, kept);
+}
+
 /** Moves a project or a folder. Folders stay at the top level (one level deep); a target that does not exist is the end. */
 export function moveTreeItem<S extends AppState>(s: S, id: string, target: TreeTarget): S {
   const tree = projectTree(s);
@@ -117,7 +135,7 @@ export function moveTreeItem<S extends AppState>(s: S, id: string, target: TreeT
     return rest.map((x, j) => (j === at ? { ...f, projects, folder: { ...f.folder, projectIds: projects.map((p) => p.id) } } : x));
   };
   const next = put();
-  return next === tree ? s : withTree(s, next);
+  return next === tree ? s : withTree(s, dropEmptied(tree, next));
 }
 
 /**
@@ -136,13 +154,35 @@ export function dropOnProject<S extends AppState>(s: S, dragId: string, targetId
   const target = (rest[at] as Extract<TreeItem, { kind: 'project' }>).project;
   const folder: ProjectFolder = { id: uid(), name, collapsed: false, projectIds: [target.id, item.project.id] };
   const next = rest.map((x, k) => (k === at ? { kind: 'folder' as const, folder, projects: [target, item.project] } : x));
-  return { state: withTree(s, next), folderId: folder.id };
+  return { state: withTree(s, dropEmptied(tree, next)), folderId: folder.id };
 }
 
 /** A new empty folder at the end of the list. */
 export function addFolder<S extends AppState>(s: S, name: string): { state: S; folderId: string } {
   const folder: ProjectFolder = { id: uid(), name, collapsed: false, projectIds: [] };
   return { state: withTree(s, [...projectTree(s), { kind: 'folder', folder, projects: [] }]), folderId: folder.id };
+}
+
+/**
+ * 1.2.5: "Przenieś do folderu › Nowy folder…": a new folder holding the project, at the project's place (or right after the
+ * folder it was in, which goes when it was its last project).
+ */
+export function newFolderWith<S extends AppState>(s: S, projectId: string, name: string): { state: S; folderId: string | null } {
+  const tree = projectTree(s);
+  const holder = folderOf(tree, projectId);
+  const { rest, item } = take(tree, projectId);
+  if (!item || item.kind !== 'project') return { state: s, folderId: null };
+  const folder: ProjectFolder = { id: uid(), name, collapsed: false, projectIds: [projectId] };
+  const made: TreeItem = { kind: 'folder', folder, projects: [item.project] };
+  const at = holder ? rest.findIndex((i) => i.kind === 'folder' && i.folder.id === holder.id) + 1 : tree.findIndex((i) => itemId(i) === projectId);
+  const next = [...rest.slice(0, at), made, ...rest.slice(at)];
+  return { state: withTree(s, dropEmptied(tree, next)), folderId: folder.id };
+}
+
+/** Folds or unfolds every folder (the panel header's "Zwiń / Rozwiń wszystkie foldery"). */
+export function setFoldersCollapsed<S extends AppState>(s: S, collapsed: boolean): S {
+  if (!s.projectFolders?.length) return s;
+  return { ...s, projectFolders: s.projectFolders.map((f) => ({ ...f, collapsed })) };
 }
 
 export function updateFolder<S extends AppState>(s: S, folderId: string, patch: Partial<Pick<ProjectFolder, 'name' | 'collapsed'>>): S {

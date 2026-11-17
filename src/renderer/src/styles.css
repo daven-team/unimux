@@ -372,6 +372,10 @@ html[data-platform="darwin"] .first-run-titlebar { padding-left: calc(84px / var
 .menu-item .kbd { border: 0; background: none; padding: 0; font: inherit; color: #a3a3a3; white-space: nowrap; }
 .menu-item.danger { color: #fca5a5; }
 .menu-item.disabled { opacity: 0.45; cursor: default; }
+/* 1.2.5: an item with a submenu (its arrow at the right) stays lit while the submenu is open. */
+.menu-item.has-sub.open { background: #333; color: #fff; }
+.menu-sub-arrow { margin-left: 16px; color: #9a9a9a; font-size: 14px; line-height: 1; }
+.menu.submenu { min-width: 190px; z-index: 61; }
 .menu-item.disabled:hover, .menu-item.disabled:focus-visible { background: transparent; color: var(--text-2); }
 .usage-card.busy { opacity: 0.85; }
 .usage-swapping { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-2); white-space: nowrap; }
@@ -611,7 +615,7 @@ select option { background: #171717; color: var(--text); }
 .panel-resize::after { content: ''; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; border-radius: 2px; background: var(--btn-primary-bg); opacity: 0; transition: opacity .12s; }
 .panel-resize:hover::after, .panel-resize:focus-visible::after, .panel-resize.dragging::after { opacity: 1; }
 .panel-resizing, .panel-resizing * { cursor: col-resize !important; user-select: none !important; }
-.sidebar-content { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.sidebar-content { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .side-list { min-height: 0; display: flex; flex-direction: column; }
 .sidebar .sub-item { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .project-avatar { flex: none; display: grid; place-items: center; padding: 0; border: 0; border-radius: 7px; background: transparent; cursor: pointer; }
@@ -1227,3 +1231,14 @@ html[data-window-shown="false"] *, html[data-window-shown="false"] *::before, ht
 /* The end-of-list drop line sits right after the last item, above the add buttons (not below them). */
 .project-add-row { position: relative; }
 .project-add-row.drop-end::before { content: ''; position: absolute; top: 3px; left: 0; right: 0; height: 2px; background: var(--accent); border-radius: 2px; pointer-events: none; }
+
+/* ── 1.2.5: Projects panel header icons (like Cursor's Explorer) and folders dragged in from the file manager ── */
+.side-panel-title { display: flex; align-items: center; min-height: 31px; }
+.side-panel-actions { display: flex; align-items: center; gap: 1px; margin: -5px -8px -5px auto; opacity: 0; transition: opacity .12s; }
+.side-panel:hover .side-panel-actions, .side-panel-actions:focus-within { opacity: 1; }
+.side-panel-actions > .btn.ghost.icon { width: 22px; height: 22px; padding: 0; border: 0; border-radius: 4px; color: #a4acb8; text-transform: none; letter-spacing: 0; }
+.side-panel-actions > .btn.ghost.icon:hover { color: var(--text); background: var(--bg-hover); }
+.side-panel-actions > .btn.ghost.icon > svg { width: var(--icon-size); height: var(--icon-size); stroke-width: 1.4px; }
+.sidebar-content.os-dragging .side-list { outline: 2px dashed var(--accent); outline-offset: -4px; border-radius: 6px; background: var(--accent-soft); }
+.project-group.folder-head.os-drop > .project { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--accent-soft); }
+.project-os-drop { position: absolute; left: 12px; right: 12px; bottom: 12px; padding: 8px 10px; border-radius: 6px; background: #0d1a2bf0; border: 1px solid var(--accent); color: #cfe0ff; font-size: 12px; text-align: center; pointer-events: none; }

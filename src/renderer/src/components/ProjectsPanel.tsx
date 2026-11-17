@@ -1,20 +1,20 @@
 import { shortcutText, titleWithShortcut } from '../shortcuts';
+import type { MenuItem } from './ContextMenu';
 import { useI18n } from '../i18n';
 import { useMemo, useState } from 'react';
 import { PROJECT_COLORS, renameTab, updateProject } from '../../../shared/state';
-import { dropOnProject, folderOf, moveTreeItem, projectTree, removeFolder, treeNeighbour, updateFolder, type TreeItem, type TreeTarget } from '../../../shared/projectFolders';
+import { dropOnProject, folderOf, moveTreeItem, newFolderWith, projectTree, removeFolder, setFoldersCollapsed, updateFolder, type TreeItem, type TreeTarget } from '../../../shared/projectFolders';
 import { PANEL_LIMITS } from '../../../shared/panels';
 import type { StatusCounts } from '../../../shared/status';
 import { projectCountsKey } from '../../../shared/statusCounts';
 import { useStatusCounts } from '../statusCounts';
 import { describeLayout } from '../../../shared/layout';
 import type { Project, ProjectFolder } from '../../../shared/types';
-import { closeTab, createProject, createProjectFolder, relocateProject, removeProject, renameProjectFolder, selectTab, switchProject } from '../actions';
-import { askText, setUi, update, useStore } from '../store';
+import { addProjectFolder, closeTab, createProject, createProjectFolder, relocateProject, removeProject, renameProjectFolder, selectTab, switchProject } from '../actions';
+import { askText, getS, setUi, toast, update, useStore } from '../store';
 import { useSshStore } from '../sshStore';
 import { openMenu } from './ContextMenu';
-import { IChevron, IEdit, IFile, IFolder, IGrid, IHistory, IPlus, ISnippet, IX } from './icons';
-import { ICodeEditor, IEye, IEyeOff, IMoveDown, IMoveUp, IWidth } from './menuIcons';
+import { IChevron, ICollapseAll, IExpandAll, IFolder, IGrid, IHistory, INewFolder, IPlus } from './icons';
 import { dropZone, scrollDragList, type DropZone } from './listDrag';
 import { PanelEmpty } from './PanelEmpty';
 import { StatusBadges } from './StatusBadges';
@@ -23,6 +23,41 @@ import { ProjectIconView } from './ProjectIcon';
 
 const INACTIVE_TABS = 3;
 const PROJECT_MIME = 'application/x-mc-project';
+/** Files and folders dragged in from the system file manager (Explorer, Finder). */
+const osDrag = (e: React.DragEvent) => e.dataTransfer.types.includes('Files');
+
+/**
+ * 1.2.5: folders dropped from the system file manager become projects (into `folderId` when dropped on a folder); a
+ * folder that already is a project is switched to (and moved there). Files are skipped with a note.
+ */
+async function addDroppedFolders(files: File[], folderId: string | null, tr: ReturnType<typeof useI18n>['tr']): Promise<void> {
+  const paths = (await window.mc.pathsForFiles(files).catch(() => [] as string[])).filter(Boolean);
+  if (!paths.length) return void toast(tr('Nie udało się dodać projektu.'), 'error');
+  const kinds = await window.mc.pathKinds(paths).catch(() => paths.map(() => null));
+  const dirs = paths.filter((_, i) => kinds[i] === 'dir');
+  for (const path of dirs) {
+    const id = addProjectFolder(path);
+    if (id && folderId && getS().projectFolders?.some((f) => f.id === folderId)) update((st) => moveTreeItem(st, id, { kind: 'into', folderId }));
+  }
+  if (dirs.length < paths.length) toast(tr('Pominięto pliki ({count}): projektem może być tylko folder.', { count: paths.length - dirs.length }), dirs.length ? undefined : 'error');
+}
+
+/** 1.2.5: the Projects panel header's icons (add a project, a new folder, fold or unfold every folder), like Cursor's Explorer. */
+export function ProjectsPanelActions() {
+  const { tr } = useI18n();
+  const folders = useStore((st) => st.s.projectFolders);
+  const anyOpen = (folders ?? []).some((f) => !f.collapsed);
+  const toggleLabel = anyOpen ? tr('Zwiń wszystkie foldery') : tr('Rozwiń wszystkie foldery');
+  return (
+    <div className="side-panel-actions">
+      <button className="btn ghost icon" title={tr('Dodaj projekt')} aria-label={tr('Dodaj projekt')} onClick={() => void createProject()}><IPlus /></button>
+      <button className="btn ghost icon" title={titleWithShortcut(tr('Nowy folder'), 'folder.new')} aria-label={tr('Nowy folder')} onClick={() => void createProjectFolder()}><INewFolder /></button>
+      {!!folders?.length && (
+        <button className="btn ghost icon" title={toggleLabel} aria-label={toggleLabel} onClick={() => update((st) => setFoldersCollapsed(st, anyOpen))}>{anyOpen ? <ICollapseAll /> : <IExpandAll />}</button>
+      )}
+    </div>
+  );
+}
 const FOLDER_MIME = 'application/x-mc-project-folder';
 
 const sumCounts = (list: StatusCounts[]): StatusCounts => list.reduce<StatusCounts>((a, c) => ({
@@ -58,14 +93,13 @@ function TabList({ project, active, countsOf }: { project: Project; active: bool
               e.preventDefault();
               e.stopPropagation();
               openMenu(e.clientX, e.clientY, [
-                { header: t.name },
-                { label: tr("Zmień nazwę gridu…"), icon: <IEdit />, onClick: async () => {
+                { label: tr("Zmień nazwę gridu…"), onClick: async () => {
                   const name = await askText(tr("Nazwa gridu"), t.name);
                   if (name?.trim()) update((s) => renameTab(s, project.id, t.id, name.trim()));
                 } },
-                { label: tr("Nowy grid") + '…', icon: <IGrid />, onClick: () => setUi({ modal: { kind: 'grid', projectId: project.id } }) },
+                { label: tr("Nowy grid") + '…', onClick: () => setUi({ modal: { kind: 'grid', projectId: project.id } }) },
                 { sep: true },
-                { label: tr("Zamknij grid"), icon: <IX />, onClick: () => void closeTab(project.id, t.id) },
+                { label: tr("Zamknij grid"), onClick: () => void closeTab(project.id, t.id) },
               ]);
             }}
             onClick={() => selectTab(project.id, t)}
@@ -97,11 +131,13 @@ export function ProjectsPanel({ resize }: PanelProps) {
   const tree = useMemo(() => projectTree({ projects, projectFolders: folders, sidebarOrder: order }), [projects, folders, order]);
   const [drag, setDrag] = useState<{ id: string; folder: boolean } | null>(null);
   const [over, setOver] = useState<{ id: string | null; zone: DropZone } | null>(null);
+  /** 1.2.5: files from the system file manager over the panel: null, or the folder they would go into ('' = the list). */
+  const [osOver, setOsOver] = useState<string | null>(null);
   const dragId = drag?.id ?? null;
   const endDrag = () => { setDrag(null); setOver(null); };
   const dragging = (e: React.DragEvent) => !!drag && (e.dataTransfer.types.includes(PROJECT_MIME) || e.dataTransfer.types.includes(FOLDER_MIME));
   const renameFolder = (folder: Pick<ProjectFolder, 'id' | 'name'>) => renameProjectFolder(folder.id, folder.name);
-  const newFolder = () => void createProjectFolder();
+
   /** Drops the dragged item on a row: `into` a folder or onto a project, else next to it. */
   const dropOn = (target: { id: string; folderId: string | null; isFolder: boolean }, zone: DropZone) => {
     if (!drag) return;
@@ -127,47 +163,61 @@ export function ProjectsPanel({ resize }: PanelProps) {
   const backgroundMenu = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('button, input, .project, .sub-item')) return;
     e.preventDefault();
+    // 1.2.5: Cursor-like menus here: no title row, no icons, shortcuts at the right.
     openMenu(e.clientX, e.clientY, [
-      { header: tr("Panel projektów") },
-      { label: tr("Dodaj projekt") + '…', icon: <IPlus />, onClick: () => void createProject() },
-      { label: tr("Nowy folder") + '…', icon: <IFolder />, hint: shortcutText('folder.new') || undefined, onClick: newFolder },
+      { label: tr("Dodaj projekt") + '…', onClick: () => void createProject() },
+      { label: tr("Nowy folder") + '…', hint: shortcutText('folder.new') || undefined, onClick: () => void createProjectFolder() },
       ...(project ? [
-        { label: tr("Nowy grid") + '…', icon: <IGrid />, onClick: () => setUi({ modal: { kind: 'grid', projectId: project.id } }) },
-        { label: tr("Przeglądaj pliki projektu"), icon: <IFile />, onClick: () => openFiles(project) },
+        { label: tr("Nowy grid") + '…', hint: shortcutText('grid.new') || undefined, onClick: () => setUi({ modal: { kind: 'grid', projectId: project.id } }) },
+        { label: tr("Przeglądaj pliki projektu"), onClick: () => openFiles(project) },
       ] : []),
       { sep: true },
-      { label: tr("Nowy snippet") + '…', icon: <ISnippet />, onClick: () => {
+      { label: tr("Nowy snippet") + '…', onClick: () => {
         update((st) => ({ ...st, snippetsOpen: true }));
         setUi({ modal: { kind: 'snippet', snippetId: null } });
       } },
-      { label: snippetsOpen ? tr("Ukryj snippety") : tr("Pokaż snippety"), icon: snippetsOpen ? <IEyeOff /> : <IEye />, hint: shortcutText('snippets.toggle') || undefined, onClick: () => update((st) => ({ ...st, snippetsOpen: !st.snippetsOpen })) },
+      { label: snippetsOpen ? tr("Ukryj snippety") : tr("Pokaż snippety"), hint: shortcutText('snippets.toggle') || undefined, onClick: () => update((st) => ({ ...st, snippetsOpen: !st.snippetsOpen })) },
       { sep: true },
-      { label: tr("Przywróć szerokość panelu"), icon: <IWidth />, onClick: () => resize.onFinish(PANEL_LIMITS.sidebar.default) },
+      { label: tr("Przywróć szerokość panelu"), onClick: () => resize.onFinish(PANEL_LIMITS.sidebar.default) },
     ]);
   };
 
   const menu = (e: React.MouseEvent, p: Project) => {
     e.preventDefault();
     e.stopPropagation();
-    const up = treeNeighbour(tree, p.id, -1);
-    const down = treeNeighbour(tree, p.id, 1);
     const holder = folderOf(tree, p.id);
+    const active = p.id === activeProjectId;
+    // "Przenieś do folderu ›": the other folders, a new one made with this project, and out of its folder.
+    const targets: MenuItem[] = tree.flatMap((i): MenuItem[] => (i.kind === 'folder' && i.folder.id !== holder?.id
+      ? [{ label: i.folder.name || tr('Nowy folder'), onClick: () => update((st) => moveTreeItem(st, p.id, { kind: 'into', folderId: i.folder.id })) }] : []));
+    const toFolder: MenuItem[] = [
+      ...targets,
+      ...(targets.length ? [{ sep: true } as const] : []),
+      { label: tr("Nowy folder") + '…', onClick: async () => {
+        const name = (await askText(tr('Nazwa folderu'), tr('Nowy folder')))?.trim();
+        if (name) update((st) => newFolderWith(st, p.id, name).state);
+      } },
+      ...(holder ? [{ label: tr("Wyjmij z folderu"), onClick: () => update((st) => moveTreeItem(st, p.id, { kind: 'after', id: holder.id })) }] : []),
+    ];
+    // 1.2.5 (M2): Cursor-like: no title row, no icons, short labels, shortcuts at the right; the colours stay one click away.
+    // Moving up and down is dragging; "Wyjmij z folderu" lives in "Przenieś do folderu".
     openMenu(e.clientX, e.clientY, [
-      { header: p.name },
-      // 1.0.7: no separate "Zmień nazwę" here: the project editor renames as well.
-      { label: tr("Edytuj projekt (nazwa, ikona)…"), icon: <IEdit />, onClick: () => setUi({ modal: { kind: 'project', projectId: p.id } }) },
+      { label: tr("Otwórz w Cursorze"), onClick: () => window.mc.openInEditor(p.path) },
+      { label: window.mc.platform === 'darwin' ? tr('Pokaż w Finderze') : tr('Otwórz w Eksploratorze'), onClick: () => window.mc.openPath(p.path) },
+      { sep: true },
+      { label: tr("Nowy grid") + '…', hint: active ? shortcutText('grid.new') || undefined : undefined, onClick: () => setUi({ modal: { kind: 'grid', projectId: p.id } }) },
+      { label: tr("Przeglądaj pliki projektu"), onClick: () => openFiles(p) },
+      { label: tr("Historia czatów i gridów"), hint: active ? shortcutText('history.open') || undefined : undefined, onClick: () => setUi({ modal: { kind: 'history', projectId: p.id } }) },
+      { sep: true },
+      { label: tr("Przenieś do folderu"), submenu: toFolder },
       { colors: PROJECT_COLORS, onPick: (color) => update((st) => updateProject(st, p.id, { color })) },
-      ...(up ? [{ label: tr("Przesuń wyżej"), icon: <IMoveUp />, onClick: () => update((st) => moveTreeItem(st, p.id, { kind: 'before', id: up })) }] : []),
-      ...(down ? [{ label: tr("Przesuń niżej"), icon: <IMoveDown />, onClick: () => update((st) => moveTreeItem(st, p.id, { kind: 'after', id: down })) }] : []),
-      ...(holder ? [{ label: tr("Wyjmij z folderu"), icon: <IFolder />, onClick: () => update((st) => moveTreeItem(st, p.id, { kind: 'after', id: holder.id })) }] : []),
       { sep: true },
-      { label: tr("Przeglądaj pliki projektu"), icon: <IFile />, onClick: () => openFiles(p) },
-      { label: tr("Otwórz folder"), icon: <IFolder />, onClick: () => window.mc.openPath(p.path) },
-      { label: tr("Otwórz w Cursorze"), icon: <ICodeEditor />, onClick: () => window.mc.openInEditor(p.path) },
-      { label: tr("Historia"), icon: <IHistory />, onClick: () => setUi({ modal: { kind: 'history', projectId: p.id } }) },
-      { label: tr("Zmień folder…"), icon: <IFolder />, onClick: () => void relocateProject(p.id) },
+      { label: tr("Kopiuj ścieżkę"), onClick: () => { window.mc.clipboardWrite(p.path); toast(tr('Skopiowano ścieżkę.')); } },
       { sep: true },
-      { label: tr("Usuń z listy"), icon: <IX />, danger: true, onClick: () => void removeProject(p.id) },
+      // 1.0.7: no separate "Zmień nazwę" here: the project editor renames as well.
+      { label: tr("Edytuj nazwę i ikonę…"), onClick: () => setUi({ modal: { kind: 'project', projectId: p.id } }) },
+      { label: tr("Zmień folder…"), onClick: () => void relocateProject(p.id) },
+      { label: tr("Usuń z listy"), danger: true, onClick: () => void removeProject(p.id) },
     ]);
   };
 
@@ -195,7 +245,8 @@ export function ProjectsPanel({ resize }: PanelProps) {
             >
               <div
                 className={`project ${active ? 'active' : ''} ${missing[p.id] ? 'missing' : ''}`}
-                title={`${p.name}\n${missing[p.id] ? tr('Folder nie istnieje: {path}', { path: p.path }) : p.path}\n${tr('Przeciągnij, aby zmienić kolejność')}`}
+                // 1.2.5: only the path (the name is on the row; dragging needs no hint).
+                title={missing[p.id] ? tr('Folder nie istnieje: {path}', { path: p.path }) : p.path}
                 onClick={() => switchProject(p.id)}
                 onDoubleClick={() => setUi({ modal: { kind: 'project', projectId: p.id } })}
                 onContextMenu={(e) => menu(e, p)}
@@ -236,16 +287,17 @@ export function ProjectsPanel({ resize }: PanelProps) {
   const folderMenu = (e: React.MouseEvent, folder: ProjectFolder) => {
     e.preventDefault();
     e.stopPropagation();
-    const up = treeNeighbour(tree, folder.id, -1);
-    const down = treeNeighbour(tree, folder.id, 1);
     openMenu(e.clientX, e.clientY, [
-      { header: folder.name },
-      { label: tr("Zmień nazwę folderu…"), icon: <IEdit />, onClick: () => void renameFolder(folder) },
-      { label: folder.collapsed ? tr("Rozwiń folder") : tr("Zwiń folder"), icon: <IFolder />, onClick: () => update((st) => updateFolder(st, folder.id, { collapsed: !folder.collapsed })) },
-      ...(up ? [{ label: tr("Przesuń wyżej"), icon: <IMoveUp />, onClick: () => update((st) => moveTreeItem(st, folder.id, { kind: 'before', id: up })) }] : []),
-      ...(down ? [{ label: tr("Przesuń niżej"), icon: <IMoveDown />, onClick: () => update((st) => moveTreeItem(st, folder.id, { kind: 'after', id: down })) }] : []),
+      { label: folder.collapsed ? tr("Rozwiń folder") : tr("Zwiń folder"), onClick: () => update((st) => updateFolder(st, folder.id, { collapsed: !folder.collapsed })) },
+      { label: tr("Dodaj projekt") + '…', onClick: async () => {
+        const path = await window.mc.pickFolder();
+        if (!path) return;
+        const id = addProjectFolder(path);
+        if (id) update((st) => moveTreeItem(st, id, { kind: 'into', folderId: folder.id }));
+      } },
       { sep: true },
-      { label: tr("Usuń folder (projekty zostają)"), icon: <IX />, danger: true, onClick: () => update((st) => removeFolder(st, folder.id)) },
+      { label: tr("Zmień nazwę folderu…"), onClick: () => void renameFolder(folder) },
+      { label: tr("Usuń folder (projekty zostają)"), danger: true, onClick: () => update((st) => removeFolder(st, folder.id)) },
     ]);
   };
 
@@ -255,8 +307,15 @@ export function ProjectsPanel({ resize }: PanelProps) {
     const zone = over?.id === folder.id && dragId !== folder.id ? over.zone : null;
     return (
       <div key={folder.id} data-folder-id={folder.id} className={`folder-group ${folder.collapsed ? 'collapsed' : 'open'} ${dragId === folder.id ? 'dragging' : ''}`}>
-        <div className={`project-group folder-head ${zone ? `drop-${zone}` : ''}`}
+        <div className={`project-group folder-head ${zone ? `drop-${zone}` : ''} ${osOver === folder.id ? 'os-drop' : ''}`}
           onDragOver={(e) => {
+            if (osDrag(e)) {
+              e.preventDefault();
+              e.stopPropagation();
+              e.dataTransfer.dropEffect = 'copy';
+              setOsOver(folder.id);
+              return;
+            }
             if (!dragging(e)) return;
             e.preventDefault();
             e.stopPropagation();
@@ -264,6 +323,13 @@ export function ProjectsPanel({ resize }: PanelProps) {
             setOver({ id: folder.id, zone: dropZone(e.currentTarget, e.clientY, !drag!.folder) });
           }}
           onDrop={(e) => {
+            if (osDrag(e)) {
+              e.preventDefault();
+              e.stopPropagation();
+              setOsOver(null);
+              void addDroppedFolders(Array.from(e.dataTransfer.files), folder.id, tr);
+              return;
+            }
             if (!dragging(e)) return;
             e.preventDefault();
             e.stopPropagation();
@@ -273,9 +339,8 @@ export function ProjectsPanel({ resize }: PanelProps) {
         >
           <div
             className={`project folder-row ${folder.collapsed && holdsActive ? 'holds-active' : ''}`}
-            title={`${folder.name}\n${tr('Kliknij, aby zwinąć lub rozwinąć. Przeciągnij projekt na folder, aby go dodać.')}`}
+            // 1.2.5: a click only folds it (a quick second click on the chevron no longer opens the rename); renaming is in its menu.
             onClick={() => update((st) => updateFolder(st, folder.id, { collapsed: !folder.collapsed }))}
-            onDoubleClick={() => void renameFolder(folder)}
             onContextMenu={(e) => folderMenu(e, folder)}
             draggable
             onDragStart={(e) => {
@@ -302,17 +367,29 @@ export function ProjectsPanel({ resize }: PanelProps) {
   };
 
   return (
-    <div className="sidebar-content" onContextMenu={backgroundMenu}>
+    <div className={`sidebar-content ${osOver === '' ? 'os-dragging' : ''}`} onContextMenu={backgroundMenu}>
     <div className="side-list"
         onDragOver={(e) => {
+          if (osDrag(e)) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+            if (!(e.target as HTMLElement).closest('.folder-head')) setOsOver('');
+            return;
+          }
           if (!dragging(e)) return;
           e.preventDefault();
           e.dataTransfer.dropEffect = 'move';
           scrollDragList(e.currentTarget, e.clientY);
           if (!(e.target as HTMLElement).closest('.project-group')) setOver({ id: null, zone: 'after' });
         }}
-        onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOver(null); }}
+        onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) { setOver(null); setOsOver(null); } }}
         onDrop={(e) => {
+          if (osDrag(e)) {
+            e.preventDefault();
+            setOsOver(null);
+            void addDroppedFolders(Array.from(e.dataTransfer.files), null, tr);
+            return;
+          }
           if (!dragging(e) || !drag) return;
           e.preventDefault();
           update((st) => moveTreeItem(st, drag.id, { kind: 'end' }));
@@ -320,13 +397,9 @@ export function ProjectsPanel({ resize }: PanelProps) {
         }}
       >
         {tree.map((item) => item.kind === 'project' ? renderProject(item.project, null) : renderFolder(item))}
-      {projects.length > 0 && (
-        <div className={`project-add-row ${over?.id === null ? 'drop-end' : ''}`}>
-          <button className="btn project-add-inline" onClick={() => void createProject()} title={tr('Dodaj projekt')} aria-label={tr('Dodaj projekt')}><IPlus />{tr('Dodaj projekt')}</button>
-          <button className="btn project-add-inline folder-add" onClick={newFolder} title={titleWithShortcut(tr('Nowy folder'), 'folder.new')} aria-label={tr('Nowy folder')}><IFolder />{tr('Nowy folder')}</button>
-        </div>
-      )}
-      {projects.length > 0 && <div className="project-drop-space" aria-hidden="true" />}
+      {/* 1.2.5: adding lives in the panel header (+, new folder) and in dragging folders in from the file manager. */}
+      {projects.length > 0 && <div className={`project-drop-space ${over?.id === null ? 'drop-end' : ''}`} aria-hidden="true" />}
+      {osOver !== null && <div className="project-os-drop" aria-hidden="true">{osOver ? tr('Upuść, aby dodać do folderu') : tr('Upuść folder, aby dodać go jako projekt')}</div>}
       {!projects.length && (
         <PanelEmpty>
           <p>{tr("Nie masz jeszcze projektów.")} {tr("Projekt to folder, w którym będą pracować Twoi agenci.")}</p>

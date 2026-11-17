@@ -15,7 +15,7 @@ import { TDatabase, TFiles, TGit, TMonitor, TProjects, TTerminal, TWaiting } fro
 import { WaitingBadge, WaitingPanel } from './components/WaitingPanel';
 import type { PanelResizeProps } from './components/PanelResizeHandle';
 import { LazyScreen } from './components/LazyScreen';
-import { ProjectsPanel } from './components/ProjectsPanel';
+import { ProjectsPanel, ProjectsPanelActions } from './components/ProjectsPanel';
 import { openSshView } from './ssh';
 import './components/gitPanel.css';
 
@@ -42,10 +42,12 @@ export interface SidebarPanel extends Omit<PanelDef, 'unavailableReason'> {
   unavailableReason?: (ctx: PanelContext) => MessageKey | null;
   /** 1.0.9: a count on the tile (it follows the store itself, so the rail does not re-render for it). */
   badge?: ComponentType;
+  /** 1.2.5: icon buttons at the right of the panel title (shown while the pointer is over the panel, like Cursor's Explorer). */
+  actions?: ComponentType;
 }
 
 export const SIDEBAR_PANELS: readonly SidebarPanel[] = [
-  { id: 'projects', label: 'Projekty', icon: TProjects, component: ProjectsPanel },
+  { id: 'projects', label: 'Projekty', icon: TProjects, component: ProjectsPanel, actions: ProjectsPanelActions },
   { id: 'files', label: 'Pliki', icon: TFiles, component: FilesPanel, unavailableReason: (ctx) => (ctx.hasProject ? null : 'Najpierw dodaj projekt') },
   // Git needs a project that is a repository (the tile is disabled, with the reason as its tooltip, otherwise). SSH: opens the SSH view in the main area (W3).
   { id: 'git', label: 'Git', icon: TGit, component: GitPanelLazy, unavailableReason: gitPanelReason },
