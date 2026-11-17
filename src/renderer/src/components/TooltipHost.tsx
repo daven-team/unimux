@@ -34,20 +34,37 @@ function installTooltips(): () => void {
   let suppressed = false;
   let warmUntil = 0;
 
-  /** Moves the anchor's title aside (no system tooltip) and remembers its text. */
+  /** Ancestors of the anchor whose title is set aside too: with the anchor's own title gone, the system would show theirs. */
+  let muted: Element[] = [];
+  const mute = (el: Element) => {
+    const title = el.getAttribute('title');
+    if (title === null) return;
+    el.setAttribute(HIDDEN, title);
+    el.removeAttribute('title');
+  };
+  /** Moves the anchor's title aside (no system tooltip) and remembers its text; the titles above it go aside as well. */
   const capture = (el: HTMLElement | SVGElement) => {
     const title = el.getAttribute('title');
     if (title !== null) {
       text = title;
-      el.setAttribute(HIDDEN, title);
-      el.removeAttribute('title');
+      mute(el);
     } else text = el.getAttribute(HIDDEN) ?? '';
+    for (let up = el.parentElement; up; up = up.parentElement) {
+      if (up.hasAttribute('title') || up.hasAttribute(HIDDEN)) { mute(up); if (!muted.includes(up)) muted.push(up); }
+    }
   };
   /** Gives the title back; a title set meanwhile (React re-rendered) wins over the saved one. */
-  const release = (el: HTMLElement | SVGElement) => {
+  const restore = (el: Element) => {
     const saved = el.getAttribute(HIDDEN);
     el.removeAttribute(HIDDEN);
     if (saved !== null && el.getAttribute('title') === null) el.setAttribute('title', saved);
+  };
+  /** Gives the anchor's title back, and those of the ancestors set aside with it. */
+  const release = (el: HTMLElement | SVGElement) => {
+    restore(el);
+    const up = muted;
+    muted = [];
+    for (const m of up) restore(m);
   };
 
   const hide = () => {
@@ -120,6 +137,8 @@ function installTooltips(): () => void {
       const el = record.target as HTMLElement | SVGElement;
       const title = el.getAttribute('title');
       if (title === null || !target || !el.contains(target)) continue;
+      // A title above the hovered element came back (React re-rendered it): it stays aside, else the system shows it.
+      if (muted.includes(el)) { mute(el); continue; }
       if (el === anchor) {
         // The hovered element's title changed: hide the new one too and show the current text.
         capture(el);
