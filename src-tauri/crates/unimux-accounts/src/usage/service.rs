@@ -12,7 +12,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::FutureExt;
+use futures::StreamExt;
 use futures::future::{BoxFuture, Shared};
+use futures::stream::FuturesUnordered;
 use parking_lot::Mutex;
 use serde_json::{Map, Value};
 use tokio::task::JoinHandle;
@@ -34,6 +36,8 @@ pub const WATCH: Duration = Duration::from_secs(20);
 const BACKOFF_BASE_MS: f64 = 60_000.0;
 const BACKOFF_MAX_MS: f64 = 30.0 * 60_000.0;
 pub const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
+/// 1.2.6: at most one progress state (see [`UsageService::on_progress`]) in this window while a run waits for slower reads.
+pub const PROGRESS_GAP: Duration = Duration::from_millis(250);
 const CACHE_VERSION: i64 = 2;
 /// A 403 does not go away in minutes: the account is asked again after this.
 const FORBIDDEN_HOLD_MS: f64 = 30.0 * 60_000.0;
@@ -228,6 +232,7 @@ pub struct UsageService {
     o: UsageOptions,
     inner: Mutex<Inner>,
     listeners: Mutex<Vec<Listener>>,
+    progress_listeners: Mutex<Vec<Listener>>,
 }
 
 fn key_of(r: &AccountRef) -> String {
@@ -244,6 +249,7 @@ impl UsageService {
             o,
             inner: Mutex::new(Inner { first_run: true, active: true, ..Inner::default() }),
             listeners: Mutex::new(Vec::new()),
+            progress_listeners: Mutex::new(Vec::new()),
         });
         me.load_cache();
         me
@@ -282,8 +288,34 @@ impl UsageService {
         UsageState { providers, notices, info }
     }
 
+    /// The state after every complete run (every account of the run was read, skipped or held, the cache is saved). Use
+    /// this for decisions over the whole set of accounts (the automatic switch, the limit warnings).
     pub fn on_change(&self, listener: Listener) {
         self.listeners.lock().push(listener);
+    }
+
+    /// 1.2.6: intermediate states of a run: each account's fresh result as soon as its read finished, while slower reads
+    /// (up to `fetch_timeout`) are still in flight, so one slow account does not hold back the others' numbers. At most one
+    /// state per [`PROGRESS_GAP`] (the first at once); the read that completes the run is not reported here, only to
+    /// [`Self::on_change`]. Such a state mixes fresh and not yet refreshed accounts: meant for display only (the panel).
+    pub fn on_progress(&self, listener: Listener) {
+        self.progress_listeners.lock().push(listener);
+    }
+
+    fn emit(listeners: &Mutex<Vec<Listener>>, state: &UsageState) {
+        let listeners = listeners.lock().clone();
+        for l in listeners {
+            // A bad listener must not affect the others or the run.
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| l(state)));
+        }
+    }
+
+    fn emit_progress(&self) {
+        if self.progress_listeners.lock().is_empty() {
+            return;
+        }
+        let state = self.state();
+        Self::emit(&self.progress_listeners, &state);
     }
 
     pub fn start(self: &Arc<Self>) {
@@ -477,14 +509,44 @@ impl UsageService {
             })
             .map(key_of)
             .collect();
-        let reads = Self::one_per_account(&accounts)
+        let mut reads = Self::one_per_account(&accounts)
             .into_iter()
             .map(|r| {
                 let subject = subject_keys.contains(&key_of(&r));
                 self.update(r, started, manual, subject, gap)
             })
-            .collect::<Vec<_>>();
-        futures::future::join_all(reads).await;
+            .collect::<FuturesUnordered<_>>();
+        // Each finished read is shown at once (throttled to PROGRESS_GAP); the last one is part of the final state below.
+        let mut last_push: Option<tokio::time::Instant> = None;
+        let mut dirty = false;
+        loop {
+            let finished = if dirty {
+                let due = last_push.map_or_else(tokio::time::Instant::now, |t| t + PROGRESS_GAP);
+                tokio::select! {
+                    biased;
+                    next = reads.next() => Some(next),
+                    () = tokio::time::sleep_until(due) => None,
+                }
+            } else {
+                Some(reads.next().await)
+            };
+            match finished {
+                Some(None) => break,
+                Some(Some(read)) => {
+                    if reads.is_empty() {
+                        break;
+                    }
+                    dirty |= read;
+                }
+                None => {}
+            }
+            if dirty && last_push.is_none_or(|t| t.elapsed() >= PROGRESS_GAP) {
+                dirty = false;
+                last_push = Some(tokio::time::Instant::now());
+                self.emit_progress();
+            }
+        }
+        drop(reads);
         self.prune(&(self.o.accounts)());
         {
             // Whatever of a 0.9.0 cache found no account by now is history.
@@ -496,11 +558,7 @@ impl UsageService {
         self.save_cache();
         self.sync_watch();
         let state = self.state();
-        let listeners = self.listeners.lock().clone();
-        for l in listeners {
-            // A bad listener must not affect the others or the run.
-            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| l(&state)));
-        }
+        Self::emit(&self.listeners, &state);
         state
     }
 
@@ -605,7 +663,8 @@ impl UsageService {
         FetchResult { usage: u, retry_after_ms: None, failed: false }
     }
 
-    async fn update(self: &Arc<Self>, r: AccountRef, now: f64, manual: bool, subject: bool, gap: f64) {
+    /// True when the account was read (its card may have new numbers), false when it was skipped or held.
+    async fn update(self: &Arc<Self>, r: AccountRef, now: f64, manual: bool, subject: bool, gap: f64) -> bool {
         let key = key_of(&r);
         let as_profile = r.config_dir.is_some();
         let hold = {
@@ -618,14 +677,14 @@ impl UsageService {
                 && (!manual || rate_limited(h.error.as_deref()))
             {
                 Self::restore_held(&mut g, &r, &key, h, now);
-                return;
+                return false;
             }
             let last = g.last_read.get(&key).copied();
             // Spacing applies to the same copy of the sign-in; an account that moved between the live login and a profile
             // is read once.
             let same_role = g.read_as_profile.get(&key).copied().unwrap_or(as_profile) == as_profile;
             if !subject && same_role && last.is_some_and(|l| now - l < gap) {
-                return;
+                return false;
             }
             g.last_read.insert(key.clone(), now);
             g.read_as_profile.insert(key.clone(), as_profile);
@@ -642,7 +701,7 @@ impl UsageService {
         };
         // A result for an account removed (or switched to another identity) while it was in flight is dropped.
         if !(self.o.accounts)().iter().any(|l| key_of(l) == key) {
-            return;
+            return false;
         }
         let read = match sanitize(&result.usage) {
             Some(u) if u.account_id == r.id => u,
@@ -678,7 +737,7 @@ impl UsageService {
         // A lapsed subscription has no limits: its old numbers are not kept (they would only look like an unused account).
         if matches!(usage.status, Status::Ok | Status::SignedOut | Status::ApiKey | Status::Lapsed) {
             g.providers.insert(key, usage);
-            return;
+            return true;
         }
         // Expired or failed: keep the last numbers of THIS account, marked as remembered, so the panel is never blank.
         let previous = g.providers.get(&key);
@@ -693,6 +752,7 @@ impl UsageService {
             _ => usage,
         };
         g.providers.insert(key, kept);
+        true
     }
 
     /// Returns when the next automatic attempt may happen.

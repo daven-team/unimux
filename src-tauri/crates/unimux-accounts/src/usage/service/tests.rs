@@ -331,3 +331,72 @@ async fn polling_goes_on_while_hidden_only_with_poll_hidden() {
         s.stop();
     }
 }
+
+/// 1.2.6: one slow account does not hold back the others: each finished read reaches the progress listeners at once
+/// (throttled to PROGRESS_GAP), the complete run reaches `on_change` once, with every account.
+#[tokio::test]
+async fn a_slow_account_does_not_hold_back_the_fresh_numbers_of_the_others() {
+    let f = Fx::new();
+    f.refs.lock().extend([saved_ref("claude:f2", "f2@x.io"), saved_ref("claude:slow", "slow@x.io")]);
+    let gate = Arc::new(tokio::sync::Notify::new());
+    let (refs, now) = (f.refs.clone(), f.now.clone());
+    let fetch_gate = gate.clone();
+    let mut o = UsageOptions::new(
+        Arc::new(move || refs.lock().clone()),
+        Arc::new(move |r: AccountRef| {
+            let mut a = ok(&r.id, if r.id == "claude:slow" { 70.0 } else { 20.0 });
+            a.usage.account_id = r.id.clone();
+            let gate = (r.id == "claude:slow").then(|| fetch_gate.clone());
+            async move {
+                if let Some(g) = gate {
+                    g.notified().await;
+                }
+                a
+            }
+            .boxed()
+        }),
+        f.cache.clone(),
+        Arc::new(|| true),
+        Arc::new(|| 0.0),
+        tokio::runtime::Handle::current(),
+    );
+    o.now = Arc::new(move || *now.lock());
+    let s = UsageService::new(o);
+    let progress: Arc<Mutex<Vec<UsageState>>> = Arc::default();
+    let complete: Arc<Mutex<Vec<UsageState>>> = Arc::default();
+    let (p, c) = (progress.clone(), complete.clone());
+    s.on_progress(Arc::new(move |st| p.lock().push(st.clone())));
+    s.on_change(Arc::new(move |st| c.lock().push(st.clone())));
+    let run = tokio::spawn(s.refresh(false, false, None));
+    let fresh = |st: &UsageState, id: &str| {
+        st.providers.iter().any(|u| u.account_id == id && u.source == Source::Live && u.windows[0].used_percent == 20.0)
+    };
+    // Both fast accounts show up while the slow read is still in flight.
+    let mut seen = false;
+    for _ in 0..400 {
+        if progress.lock().last().is_some_and(|st| fresh(st, "claude:main") && fresh(st, "claude:f2")) {
+            seen = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert!(seen, "the fast accounts' numbers came before the slow read finished");
+    {
+        let p = progress.lock();
+        assert!((1..=2).contains(&p.len()), "throttled: {} progress states", p.len());
+        assert!(p.iter().all(|st| !st.providers.iter().any(|u| u.account_id == "claude:slow")));
+    }
+    assert!(complete.lock().is_empty(), "no complete state before the slow read finished");
+    assert!(!run.is_finished());
+    gate.notify_one();
+    let state = run.await.unwrap();
+    let pct = |st: &UsageState, id: &str| st.providers.iter().find(|u| u.account_id == id).map(|u| u.windows[0].used_percent);
+    assert_eq!(
+        (pct(&state, "claude:main"), pct(&state, "claude:f2"), pct(&state, "claude:slow")),
+        (Some(20.0), Some(20.0), Some(70.0))
+    );
+    let complete = complete.lock();
+    assert_eq!(complete.len(), 1);
+    assert_eq!(pct(&complete[0], "claude:slow"), Some(70.0));
+    assert_eq!(complete[0].providers.len(), 3);
+}

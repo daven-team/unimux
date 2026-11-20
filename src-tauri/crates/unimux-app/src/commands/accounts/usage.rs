@@ -336,11 +336,16 @@ impl Hub {
                 tauri::async_runtime::spawn(async move { auto.on_state(providers).await });
             }
         }));
-        hub.usage.on_change(Arc::new(move |s: &UsageState| {
+        // The panel also gets the intermediate states of a run (each account as soon as its read finished); the limit
+        // warnings and the automatic switch above see complete runs only (a half-refreshed set must not decide a switch
+        // or an "all accounts are over the threshold" notice).
+        let send: Arc<dyn Fn(&UsageState) + Send + Sync> = Arc::new(move |s: &UsageState| {
             if let Some(c) = w3.upgrade() {
                 c.events.send("usage:state", vec![s.to_value()]);
             }
-        }));
+        });
+        hub.usage.on_change(send.clone());
+        hub.usage.on_progress(send);
         hub
     }
 
