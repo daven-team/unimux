@@ -71,6 +71,7 @@ fn fx(answer: impl Fn(&Request, usize) -> Result<Response, FetchError> + Send + 
             now: Arc::new(|| NOW),
             codex_home: Arc::new(|| PathBuf::from("/nowhere/.codex")),
             claude_url: "https://api.anthropic.com/api/oauth/usage".into(),
+            claude_profile_url: "https://api.anthropic.com/api/oauth/profile".into(),
             codex_url: "https://chatgpt.com/backend-api/wham/usage".into(),
             refresh_claude: None,
             sleep: Arc::new(|_| async {}.boxed()),
@@ -167,6 +168,70 @@ async fn statuses_of_failed_reads() {
     let f = fx(|_, _| Err(FetchError::RedirectRefused { status: 302, location: Some("x".into()) }));
     f.live_login("tok", NOW + 3_600_000.0, None);
     assert_eq!(fetch_claude(&f.deps, &live()).await.usage.error.as_deref(), Some("network"));
+}
+
+/// 1.2.6: a usage 403 asks the OAuth profile once, with the same (valid) token; a lapsed subscription of this very account
+/// becomes `lapsed`, any other answer keeps `forbidden` (the badge may take the profile's plan).
+#[tokio::test]
+async fn a_usage_403_asks_the_profile_whether_the_subscription_lapsed() {
+    let profile = |status: &str, tier: &str, account: &str| {
+        json!({
+            "account": { "uuid": account },
+            "organization": { "uuid": "org-1", "subscription_status": status, "rate_limit_tier": tier, "organization_type": "claude_max" },
+        })
+        .to_string()
+    };
+    let run = |body: String, uuids: bool| async move {
+        let f = fx(move |req, _| {
+            Ok(if req.url.path().ends_with("/profile") { response(200, &body, &[]) } else { response(403, "{}", &[]) })
+        });
+        let creds = json!({ "claudeAiOauth": { "accessToken": "tok", "refreshToken": "r", "expiresAt": NOW + 3_600_000.0,
+            "refreshTokenExpiresAt": NOW + 86_400_000.0, "subscriptionType": "max", "rateLimitTier": "default_claude_max_5x" } });
+        f.put("/p/r1/.credentials.json", creds);
+        let account = if uuids {
+            json!({ "emailAddress": "b@x.io", "accountUuid": "acc-1", "organizationUuid": "org-1" })
+        } else {
+            json!({ "emailAddress": "b@x.io" })
+        };
+        f.put("/p/r1/.claude.json", json!({ "oauthAccount": account }));
+        let r = fetch_claude(&f.deps, &saved(RenewRule::Allowed)).await;
+        let requests = f.fake.requests.lock().clone();
+        (r.usage, requests)
+    };
+
+    let (u, requests) = run(profile("canceled", "default_claude_ai", "acc-1"), true).await;
+    assert_eq!((u.status, u.error.as_deref(), u.plan.as_deref()), (Status::Lapsed, Some("subscription-lapsed"), Some("Free")));
+    assert_eq!(u.login_expires_at, Some(NOW + 86_400_000.0));
+    assert_eq!(requests.len(), 2, "one usage read, one profile read, no renewal");
+    assert_eq!(requests[1].url.as_str(), "https://api.anthropic.com/api/oauth/profile");
+    assert!(requests[1].headers.contains(&("Authorization".into(), "Bearer tok".into())));
+    assert!(requests[1].headers.contains(&("User-Agent".into(), "unimux/1.2.0".into())));
+
+    // Still in its paid period (or paused): forbidden, with the profile's plan on the badge.
+    let (u, _) = run(profile("active", "default_claude_max_20x", "acc-1"), true).await;
+    assert_eq!((u.status, u.error.as_deref(), u.plan.as_deref()), (Status::Forbidden, Some("http-403"), Some("Max 20x")));
+    // An answer about another account, or a login that records no UUID, proves nothing.
+    let (u, _) = run(profile("canceled", "default_claude_ai", "acc-2"), true).await;
+    assert_eq!((u.status, u.plan.as_deref()), (Status::Forbidden, Some("Max 5x")));
+    let (u, _) = run(profile("canceled", "default_claude_ai", "acc-1"), false).await;
+    assert_eq!(u.status, Status::Forbidden);
+    // A failed profile read keeps today's 403.
+    let (u, _) = run("not json".into(), true).await;
+    assert_eq!((u.status, u.error.as_deref()), (Status::Forbidden, Some("http-403")));
+}
+
+/// 1.2.6: `refreshTokenExpiresAt` reaches the card; absent, nothing is set.
+#[tokio::test]
+async fn the_login_end_is_read_from_the_credentials() {
+    let f = fx(|_, _| Ok(response(200, OK_BODY, &[])));
+    f.live_login("tok", NOW + 3_600_000.0, Some("r"));
+    assert_eq!(fetch_claude(&f.deps, &live()).await.usage.login_expires_at, None);
+    let creds = json!({ "claudeAiOauth": { "accessToken": "tok", "refreshToken": "r", "expiresAt": NOW + 3_600_000.0, "refreshTokenExpiresAt": NOW + 5.0 * 86_400_000.0 } });
+    f.put("/home/u/.claude/.credentials.json", creds);
+    let u = fetch_claude(&f.deps, &live()).await.usage;
+    assert_eq!((u.status, u.login_expires_at), (Status::Ok, Some(NOW + 5.0 * 86_400_000.0)));
+    assert!(u.to_value().to_string().contains("\"loginExpiresAt\":"));
+    assert!(!u.to_value().to_string().contains("tok"));
 }
 
 #[tokio::test]

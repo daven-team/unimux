@@ -255,6 +255,17 @@ async fn run(dir: &Path, deps: &RefreshDeps) -> RefreshOutcome {
         if let Some(r) = &rotated {
             oauth.insert("refreshToken".into(), Value::String(r.clone()));
         }
+        // 1.2.6: the login's end (`refreshTokenExpiresAt`) never moves later on a renewal, as in Claude Code: the earlier of
+        // the stored one and the one this answer gives; nothing is added when none was stored.
+        if let (Some(stored), Some(seconds)) = (
+            oauth.get("refreshTokenExpiresAt").and_then(Value::as_f64),
+            body.get("refresh_token_expires_in").and_then(Value::as_f64).filter(|s| s.is_finite() && *s > 0.0),
+        ) {
+            let given = (deps.now)() + seconds * 1000.0;
+            if given < stored {
+                oauth.insert("refreshTokenExpiresAt".into(), js::num(given));
+            }
+        }
         if let Some(scope) = body.get("scope").and_then(Value::as_str).filter(|s| !s.is_empty()) {
             oauth.insert("scopes".into(), Value::Array(scope.split(' ').map(|s| Value::String(s.into())).collect()));
         }

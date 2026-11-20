@@ -21,6 +21,8 @@ pub const TOKEN_MAX_BODY: u64 = 1_000_000;
 
 /// src/main/index.ts usageDeps; fetchers.ts REQUEST_TIMEOUT_MS.
 pub const CLAUDE_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
+/// The OAuth profile (1.2.6): read only after a usage 403, to tell a lapsed subscription from other refusals.
+pub const CLAUDE_PROFILE_URL: &str = "https://api.anthropic.com/api/oauth/profile";
 pub const CODEX_USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
 pub const USAGE_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -77,6 +79,11 @@ pub fn claude_usage(url: &str, access_token: &str, user_agent: &str) -> Result<R
         .timeout(USAGE_TIMEOUT)
         .redirect(Redirect::Error)
         .route(Route::System))
+}
+
+/// Claude OAuth profile read (1.2.6): the same headers, timeout, redirect rule and proxy as [`claude_usage`].
+pub fn claude_profile(url: &str, access_token: &str, user_agent: &str) -> Result<Request, FetchError> {
+    claude_usage(url, access_token, user_agent)
 }
 
 /// Codex usage read (fetchers.ts readCodexLimits): Accept, the bearer token and the account header when known; 5 s;

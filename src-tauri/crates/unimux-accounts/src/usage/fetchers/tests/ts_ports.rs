@@ -71,7 +71,8 @@ async fn ts_a_403_is_forbidden_for_the_live_login_and_saved_accounts_without_ren
     let before = calls(&f);
     let r = fetch_claude(&f.deps, &saved(RenewRule::Allowed)).await;
     assert_eq!((r.usage.status, r.usage.error.as_deref()), (Status::Forbidden, Some("http-403")));
-    assert_eq!((f.renewals.load(Ordering::SeqCst), calls(&f) - before), (0, 1));
+    // 1.2.6: the one extra request is the profile read (no answer here), never a renewal.
+    assert_eq!((f.renewals.load(Ordering::SeqCst), calls(&f) - before), (0, 2));
 }
 
 /// "does not use an expired token and says so", "treats an expired main token with a refresh token as dormant: no request,

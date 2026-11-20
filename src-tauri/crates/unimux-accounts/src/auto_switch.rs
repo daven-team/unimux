@@ -594,6 +594,8 @@ pub fn plan_auto_switch(
                     && u.managed == Some(true)
                     && !u.active
                     && card_state(u) != CardState::Expired
+                    // 1.2.6: a lapsed subscription is never a target, nor one still waiting for its numbers.
+                    && u.status != Status::Lapsed
                     && target.is_none_or(|t| account_key(u) == *t)
             })
             .collect();

@@ -339,7 +339,7 @@ export function planAutoSwitch(input: { providers: ProviderUsage[]; provider: Us
     if (escape.length) return { kind: mode, reason: 'limit', from, trigger, candidates: escape };
     // "All accounts are over the threshold" only when that is known: some other saved account exists and none of them is
     // still waiting for its numbers (a card not read yet, a failed read) - those are looked at again with the next state.
-    const others = providers.filter((usage) => usage.provider === provider && usage.managed && !usage.active && cardState(usage) !== 'expired' && (!settings.target[provider] || accountKey(usage) === settings.target[provider]));
+    const others = providers.filter((usage) => usage.provider === provider && usage.managed && !usage.active && cardState(usage) !== 'expired' && usage.status !== 'lapsed' && (!settings.target[provider] || accountKey(usage) === settings.target[provider]));
     const unknown = others.some((usage) => usage.status !== 'ok' || usage.source !== 'live' || !usage.windows.length || nowMs - usage.fetchedAt > CANDIDATE_MAX_AGE_MS);
     if (!others.length || unknown) return { kind: 'none', reason: 'noCandidate', from, trigger };
     if (told(memory, provider, offerKey('exhausted', key), trigger.window, trigger.resetsAt)) return { kind: 'none', reason: 'noCandidate', from, trigger };

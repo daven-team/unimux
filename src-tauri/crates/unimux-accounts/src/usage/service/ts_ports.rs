@@ -1500,13 +1500,19 @@ async fn a_forbidden_account_is_held_for_30_minutes_also_after_a_restart() {
     s.refresh(false, true, None).await;
     assert_eq!(f.total(), 1);
     let after = UsageService::new(f.options(live, answer));
-    after.refresh(false, true, None).await;
-    let p = after.state().providers[0].clone();
-    assert_eq!((p.status, p.error.as_deref(), p.retry_at), (Status::Forbidden, Some("http-403"), Some(NOW + 30.0 * 60_000.0)));
-    assert_eq!(f.total(), 1);
-    advance(30 * 60_000).await;
+    assert_eq!(after.inner.lock().backoff.get("uuid:A:-").map(|h| h.until), Some(NOW + 30.0 * 60_000.0), "the hold survives");
+    // 1.2.6: the first run after a start reads it anyway (like the refresh button); the next automatic run is held again.
     after.refresh(false, true, None).await;
     assert_eq!(f.total(), 2);
+    let p = after.state().providers[0].clone();
+    let now = NOW + MIN_IDENTITY_GAP_MS + 1.0;
+    assert_eq!((p.status, p.error.as_deref(), p.retry_at), (Status::Forbidden, Some("http-403"), Some(now + 30.0 * 60_000.0)));
+    advance(MIN_IDENTITY_GAP_MS as u64 + 1).await;
+    after.refresh(false, true, None).await;
+    assert_eq!(f.total(), 2);
+    advance(30 * 60_000).await;
+    after.refresh(false, true, None).await;
+    assert_eq!(f.total(), 3);
 }
 
 // ---- usage-restart.test.ts --------------------------------------------------------------------------------------------

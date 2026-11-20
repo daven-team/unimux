@@ -171,6 +171,7 @@ fn read(s: &D, r: &AccountRef, status: u16, outcome: RefreshOutcome) -> Read {
         now: Arc::new(|| NOW),
         codex_home: Arc::new(|| PathBuf::from("/nowhere/.codex")),
         claude_url: "https://claude.test/usage".into(),
+        claude_profile_url: "https://claude.test/profile".into(),
         codex_url: "https://codex.test/usage".into(),
         refresh_claude: Some(Arc::new(move |_: &Path| {
             n.fetch_add(1, Ordering::SeqCst);

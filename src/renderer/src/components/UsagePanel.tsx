@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { updateSettings } from '../../../shared/state';
 import type { AccountNotice, LoginTarget } from '../../../shared/accounts';
-import { adoptCopyOffered, cardState, claudeLoginActions, diagnosticLabel, effectivePercent, formatDuration, makeMainOffered, shortAccountName, shortDuration, summaryAccounts, usageBand, usageDiagnostics, usageErrorKind, usageSummary, withoutRemovedCards, removedCardKey, type ProviderUsage, type SetAsideAccount, type UsageProvider, type UsageWindow } from '../../../shared/usage';
+import { adoptCopyOffered, cardState, claudeLoginActions, diagnosticLabel, effectivePercent, formatDuration, loginEndNotice, makeMainOffered, shortAccountName, shortDuration, summaryAccounts, usageBand, usageDiagnostics, usageErrorKind, usageSummary, withoutRemovedCards, removedCardKey, type ProviderUsage, type SetAsideAccount, type UsageProvider, type UsageWindow } from '../../../shared/usage';
 import { cswapNoteText, noticeText, setAsideText, usageErrorKey } from '../../../shared/usageMessages';
 import { useI18n } from '../i18n';
 import { swapErrorKey, swapErrorText } from '../../../shared/swapMessages';
@@ -24,6 +24,7 @@ const HELD_NOTE = {
 const DORMANT_SHORT = 'Limity wrócą po następnej wiadomości w Claude.';
 const FORBIDDEN_NOTE = 'Odmowa dostępu (HTTP 403), np. wstrzymana subskrypcja. Logowanie jest ważne - ponowne logowanie nie pomoże.';
 const FORBIDDEN_SHORT = 'Odmowa dostępu (HTTP 403)';
+const LAPSED_NOTE = 'Subskrypcja tego konta wygasła, więc nie ma limitów do pokazania. Aplikacja sprawdza ją co kilka godzin - po odnowieniu limity wrócą same. Możesz też usunąć konto.';
 const CSWAP_NOTE = 'Kopię tego logowania ma też cswap, więc aplikacja jej nie odnawia.';
 const ADOPT_LABEL = 'Odświeżaj tę kopię w unimuxie';
 const ADOPT_BODY = 'Od teraz unimux będzie sam odnawiał tę kopię logowania.\n\nTo bezpieczne, jeśli logowano się do tego konta w unimuxie. Jeśli kopia pochodzi z „Ustaw jako główne” w starszej wersji, cswap może stracić swój token dla tego konta - wtedy wystarczy raz zalogować się do niego ponownie w cswap.\n\n„Zaloguj ponownie” pozostaje dostępne dla logowań, które naprawdę wygasły.';
@@ -154,7 +155,11 @@ function AccountCard({ usage, now, language, showMain, savedIndex, swapping, onM
   // One of a few fixed states (cardState): the same situation always looks the same, whatever the reason behind it.
   const state = cardState(usage);
   const expired = state === 'expired';
+  // 1.2.6: a lapsed subscription: no bars, one line and "Remove account" right on the card.
+  const lapsed = state === 'lapsed';
   const dormant = usage.status === 'dormant';
+  // 1.2.6: the stored Claude login ends within a week (or ended and the card does not say so yet).
+  const loginEnd = lapsed ? undefined : loginEndNotice(usage, now);
   const removeAccount = async () => {
     const choice = await askChoice(
       tr('Usunąć konto {name}?', { name }),
@@ -208,7 +213,9 @@ function AccountCard({ usage, now, language, showMain, savedIndex, swapping, onM
   const canRelogin = (usage.managed && !usage.active && usage.provider === 'claude' && !expired && usage.status !== 'forbidden'
     && (kind === 'refreshLimited' || kind === 'refresh' || heldElsewhere) && claudeLoginActions(window.mc.platform, true).managedAccounts)
     // A saved Codex copy can always be signed in again (into its own profile).
-    || (usage.provider === 'codex' && !!usage.managed && !usage.active && !expired);
+    || (usage.provider === 'codex' && !!usage.managed && !usage.active && !expired)
+    // 1.2.6: a login that ends soon (or ended) can be renewed by signing in again before it stops working.
+    || (!!loginEnd && (usage.managed && !usage.active ? claudeLoginActions(window.mc.platform, true).managedAccounts : true));
   const failureText = tr(usageErrorKey(kind, usage.provider), { name: providerName, retry });
 
   // Details of a state are a tooltip at most: the card itself shows one short line and, when expired, one button.
@@ -222,6 +229,15 @@ function AccountCard({ usage, now, language, showMain, savedIndex, swapping, onM
       <div className="usage-expired" title={heldTitle ?? reasonTitle}>
         <span className="usage-note">{tr('Logowanie wygasło')}</span>
         <button className="btn small primary" onClick={() => openAuth(usage.provider, reloginTarget(usage))}>{tr('Zaloguj ponownie')}</button>
+      </div>
+    );
+  } else if (lapsed) {
+    // The remove action of the account menu, on the card itself: a saved account goes, a main login's card leaves the panel.
+    const remove = usage.managed ? () => void removeAccount() : onRemoveCard ? () => void removeCard() : undefined;
+    body = (
+      <div className="usage-expired" title={tr(LAPSED_NOTE)}>
+        <span className="usage-note warn">{tr('Subskrypcja wygasła')}</span>
+        {remove && <button className="btn small" disabled={usage.managed && busy} onClick={remove}>{tr('Usuń konto')}</button>}
       </div>
     );
   } else if (state === 'apiKey') {
@@ -249,7 +265,7 @@ function AccountCard({ usage, now, language, showMain, savedIndex, swapping, onM
   }
 
   return (
-    <div className={`usage-card ${expired ? 'expired' : ''} ${dormant && !expired ? 'dormant' : ''} ${state === 'stale' && usage.status === 'error' ? 'stale' : ''} ${swapping === usage.accountId ? 'busy' : ''}`} title={usage.org || undefined} aria-busy={swapping === usage.accountId || undefined}>
+    <div className={`usage-card ${expired || lapsed ? 'expired' : ''} ${dormant && !expired ? 'dormant' : ''} ${state === 'stale' && usage.status === 'error' ? 'stale' : ''} ${swapping === usage.accountId ? 'busy' : ''}`} title={usage.org || undefined} aria-busy={swapping === usage.accountId || undefined}>
       <div className="usage-card-head">
         <ProviderIcon provider={usage.provider} />
         <span className="usage-account" title={name}>{name}</span>
@@ -274,12 +290,19 @@ function AccountCard({ usage, now, language, showMain, savedIndex, swapping, onM
               ...(canRelogin ? [{ label: tr('Zaloguj ponownie to konto'), disabled: busy, onClick: () => openAuth(usage.provider, reloginTarget(usage)) }] : []),
               { label: tr('Skopiuj diagnostykę'), onClick: copyDiagnostics },
               ...(usage.managed ? [{ label: tr('Usuń konto'), danger: true, disabled: busy, onClick: () => void removeAccount() }]
-                : expired && onRemoveCard ? [{ label: tr('Usuń konto'), danger: true, onClick: () => void removeCard() }] : []),
+                : (expired || lapsed) && onRemoveCard ? [{ label: tr('Usuń konto'), danger: true, onClick: () => void removeCard() }] : []),
             ])}
           ><KebabIcon /></button>
         )}
       </div>
       {body}
+      {loginEnd && (
+        <p className="usage-note warn" title={loginEnd.kind === 'soon'
+          ? tr('Zapisane logowanie tego konta wygasa {date}. Potem trzeba będzie zalogować się ponownie.', { date: new Date(now + loginEnd.leftMs).toLocaleString(language, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) })
+          : tr('Zapisane logowanie tego konta wygasło. Zaloguj się ponownie, aby znów widzieć limity.')}>
+          {loginEnd.kind === 'soon' ? tr('Zaloguj ponownie za {time}', { time: formatDuration(loginEnd.leftMs / 1000) }) : tr('Wymaga ponownego logowania')}
+        </p>
+      )}
     </div>
   );
 }
