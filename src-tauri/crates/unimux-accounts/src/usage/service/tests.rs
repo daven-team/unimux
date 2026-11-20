@@ -179,9 +179,109 @@ async fn a_legacy_cache_moves_to_the_saved_card_with_the_same_id() {
     let state = s.state();
     let saved = state.providers.iter().find(|p| p.account_id == "claude:r1").unwrap();
     assert_eq!((saved.windows[0].used_percent, saved.managed), (33.0, Some(true)));
-    // Its hold came along: the first run reads the live card only.
+    // Its hold came along: the first run (manual since 1.2.6) still reads it, a later automatic run does not.
     s.refresh(false, false, None).await;
-    assert_eq!(f.calls(), 1);
+    assert_eq!(f.calls(), 2);
+    let hold = s.inner.lock().backoff.get("b@x.io").cloned();
+    assert_eq!(hold, None, "the read succeeded, so the hold is gone");
+}
+
+fn saved_ref(id: &str, key: &str) -> AccountRef {
+    AccountRef {
+        id: id.into(),
+        provider: "claude".into(),
+        config_dir: Some(PathBuf::from(format!("/p/{id}"))),
+        key: Some(key.into()),
+        ..Default::default()
+    }
+}
+
+/// 1.2.6: the first run of a process reads every account like the refresh button: holds restored from the cache (an error
+/// backoff, a 403, a lapsed subscription) do not keep stale numbers after a start; only a rate-limit hold is respected. Later
+/// automatic runs keep the holds as before.
+#[tokio::test]
+async fn the_first_run_after_a_start_reads_held_accounts_except_a_rate_limit() {
+    let f = Fx::new();
+    let held = |error: &str| json!({ "until": T0 + 1_000_000.0, "failures": 2, "error": error, "attemptAt": T0 - 60_000.0 });
+    let numbers = |id: &str| {
+        json!({ "accountId": id, "provider": "claude", "status": "ok", "source": "live", "fetchedAt": T0 - 600_000.0,
+        "windows": [{ "id": "5h", "usedPercent": 50, "resetsAt": 1_791_730_000.0 }] })
+    };
+    let cache = json!({
+        "version": 2,
+        "entries": [
+            { "key": "a@x.io", "usage": numbers("claude:main") },
+            { "key": "e@x.io", "usage": numbers("claude:e") },
+            { "key": "f@x.io", "usage": numbers("claude:f") },
+            { "key": "r@x.io", "usage": numbers("claude:r") },
+        ],
+        "backoff": { "a@x.io": held("http-500"), "e@x.io": held("http-403"), "f@x.io": held("subscription-lapsed"),
+                     "r@x.io": held("http-429") },
+        // Read 10 minutes ago: past the 30 s start guard.
+        "reads": { "a@x.io": T0 - 600_000.0, "e@x.io": T0 - 600_000.0, "f@x.io": T0 - 600_000.0, "r@x.io": T0 - 600_000.0 },
+    });
+    std::fs::write(&f.cache, cache.to_string()).unwrap();
+    f.refs.lock().extend([saved_ref("claude:e", "e@x.io"), saved_ref("claude:f", "f@x.io"), saved_ref("claude:r", "r@x.io")]);
+    let s = f.service();
+    s.start();
+    // The start's run reads the three accounts held for other reasons, not the rate-limited one.
+    for _ in 0..200 {
+        if s.inner.lock().pending.is_none() && f.calls() >= 3 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert_eq!(f.calls(), 3);
+    let state = s.state();
+    let card = |id: &str| state.providers.iter().find(|p| p.account_id == id).cloned().unwrap();
+    for id in ["claude:main", "claude:e", "claude:f"] {
+        let c = card(id);
+        assert_eq!((c.status, c.source, c.windows[0].used_percent), (Status::Ok, Source::Live, 10.0), "{id}");
+    }
+    let r = card("claude:r");
+    assert_eq!((r.status, r.error.as_deref(), r.retry_at), (Status::Error, Some("http-429"), Some(T0 + 1_000_000.0)));
+
+    // A later automatic run keeps an error hold: only the first run of the process is manual.
+    *f.answer.lock() = err("claude:main", "http-503", Some(3_600_000.0));
+    f.advance(MIN_IDENTITY_GAP_MS + 1.0);
+    s.refresh(false, false, None).await;
+    assert_eq!(f.calls(), 6, "the three readable accounts failed now (the 429 one is still held)");
+    f.advance(MIN_IDENTITY_GAP_MS + 1.0);
+    s.refresh(false, false, None).await;
+    assert_eq!(f.calls(), 6, "their new backoff holds them on an automatic run");
+    s.stop();
+}
+
+/// 1.2.6: a lapsed subscription is held for 6 hours, drops its stale numbers, survives a restart as lapsed and is read
+/// again after the hold (a renewed subscription comes back).
+#[tokio::test]
+async fn a_lapsed_subscription_is_held_for_six_hours_and_kept_across_a_restart() {
+    let f = Fx::new();
+    let s = f.service();
+    s.refresh(false, false, None).await;
+    assert_eq!(s.state().providers[0].windows.len(), 1);
+    let mut lapsed = ProviderUsage::new("claude:main", Provider::Claude, Status::Lapsed, T0, Source::Live);
+    lapsed.error = Some("subscription-lapsed".into());
+    lapsed.plan = Some("Free".into());
+    *f.answer.lock() = FetchResult { usage: lapsed, retry_after_ms: None, failed: false };
+    f.advance(MIN_IDENTITY_GAP_MS + 1.0);
+    let now = *f.now.lock();
+    let p = s.refresh(false, false, None).await.providers[0].clone();
+    assert_eq!((p.status, p.windows.len(), p.plan.as_deref()), (Status::Lapsed, 0, Some("Free")));
+    assert_eq!(p.retry_at, Some(now + LAPSED_HOLD_MS));
+    f.advance(3_600_000.0);
+    s.refresh(false, false, None).await;
+    assert_eq!(f.calls(), 2, "held");
+    drop(s);
+
+    let s = f.service();
+    let p = s.state().providers[0].clone();
+    assert_eq!((p.status, p.source, p.windows.len()), (Status::Lapsed, Source::Cache, 0), "lapsed at once after a restart");
+    *f.answer.lock() = ok("claude:main", 20.0);
+    f.advance(LAPSED_HOLD_MS);
+    s.refresh(false, false, None).await;
+    let p = s.state().providers[0].clone();
+    assert_eq!((p.status, p.windows.len()), (Status::Ok, 1));
 }
 
 #[tokio::test]

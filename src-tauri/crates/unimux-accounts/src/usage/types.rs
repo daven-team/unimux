@@ -54,6 +54,9 @@ pub enum Status {
     Elsewhere,
     /// The usage endpoint answered 403 (e.g. a paused subscription); the sign-in itself is valid.
     Forbidden,
+    /// 1.2.6: the usage endpoint answered 403 and the account's OAuth profile says its subscription lapsed (`canceled` on
+    /// the free tier); the sign-in is valid but there are no limits to show.
+    Lapsed,
 }
 
 impl Status {
@@ -67,6 +70,7 @@ impl Status {
             Status::Error => "error",
             Status::Elsewhere => "elsewhere",
             Status::Forbidden => "forbidden",
+            Status::Lapsed => "lapsed",
         }
     }
 
@@ -80,6 +84,7 @@ impl Status {
             "error" => Status::Error,
             "elsewhere" => Status::Elsewhere,
             "forbidden" => Status::Forbidden,
+            "lapsed" => Status::Lapsed,
             _ => return None,
         })
     }
@@ -214,6 +219,8 @@ pub struct ProviderUsage {
     pub retry_at: Option<f64>,
     pub active: bool,
     pub held_by: Option<HeldBy>,
+    /// 1.2.6: epoch ms when the stored Claude login's refresh token expires (`refreshTokenExpiresAt`), when the file says.
+    pub login_expires_at: Option<f64>,
 }
 
 impl ProviderUsage {
@@ -235,6 +242,7 @@ impl ProviderUsage {
             retry_at: None,
             active: false,
             held_by: None,
+            login_expires_at: None,
         }
     }
 
@@ -261,6 +269,9 @@ impl ProviderUsage {
         }
         if let Some(r) = self.retry_at {
             m.insert("retryAt".into(), js::num(r));
+        }
+        if let Some(l) = self.login_expires_at {
+            m.insert("loginExpiresAt".into(), js::num(l));
         }
         if let Some(managed) = self.managed {
             m.insert("managed".into(), managed.into());
@@ -293,6 +304,8 @@ pub enum CardState {
     Expired,
     Unavailable,
     ApiKey,
+    /// 1.2.6: the subscription lapsed: no limits, the card offers removing the account.
+    Lapsed,
 }
 
 /// `cardState`.
@@ -302,6 +315,9 @@ pub fn card_state(usage: &ProviderUsage) -> CardState {
     }
     if usage.status == Status::Expired {
         return CardState::Expired;
+    }
+    if usage.status == Status::Lapsed {
+        return CardState::Lapsed;
     }
     // Held only by the live login (its numbers are on the main card) is not a sign-in problem.
     if usage.status == Status::Elsewhere && usage.held_by != Some(HeldBy::Live) {

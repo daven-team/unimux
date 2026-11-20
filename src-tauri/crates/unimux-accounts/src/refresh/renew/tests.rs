@@ -156,6 +156,34 @@ async fn renews_the_tokens_rotates_the_refresh_token_and_keeps_every_other_key()
     assert_eq!(req.redirect, Redirect::ErrorAny3xx);
 }
 
+/// 1.2.6: `refreshTokenExpiresAt` never moves later on a renewal (as in Claude Code) and is never added when none was stored.
+#[tokio::test]
+async fn the_login_end_only_moves_earlier_and_is_never_added() {
+    for (stored, given_s, expect) in [
+        (Some(NOW + 10.0 * 86_400_000.0), 86_400.0, Some(NOW + 86_400_000.0)),
+        (Some(NOW + 86_400_000.0), 30.0 * 86_400.0, Some(NOW + 86_400_000.0)),
+        (None, 86_400.0, None),
+    ] {
+        let fx = Fx::new();
+        let mut p = profile();
+        if let Some(s) = stored {
+            p["claudeAiOauth"]["refreshTokenExpiresAt"] = js::num(s);
+        }
+        fx.write(&p);
+        let f = fake(move |_| {
+            async move {
+                reply(
+                    200,
+                    json!({ "access_token": "n", "refresh_token": "r2", "expires_in": 60, "refresh_token_expires_in": given_s }),
+                )
+            }
+            .boxed()
+        });
+        assert_eq!(fx.refresh(&deps(f)).await, RefreshOutcome::Ok);
+        assert_eq!(fx.read()["claudeAiOauth"]["refreshTokenExpiresAt"].as_f64(), expect, "{stored:?}");
+    }
+}
+
 #[tokio::test]
 async fn keeps_the_old_refresh_token_when_the_server_does_not_rotate_it() {
     let fx = Fx::new();

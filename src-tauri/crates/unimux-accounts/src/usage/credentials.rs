@@ -197,6 +197,8 @@ pub struct ClaudeCredentials {
     pub has_refresh: bool,
     /// SHA-256 of the refresh token.
     pub refresh_hash: Option<String>,
+    /// 1.2.6: `refreshTokenExpiresAt` (epoch ms): after it the login needs a new sign-in. Only this number is read.
+    pub refresh_expires_at: Option<f64>,
 }
 
 /// `claudePlanLabel`: "Max 20x", "Pro".
@@ -250,6 +252,7 @@ pub async fn read_claude_credentials(source: &CredentialSource) -> Option<Claude
             plan: None,
             has_refresh: false,
             refresh_hash: None,
+            refresh_expires_at: None,
         });
     }
     let raw = source.claude_login_text().await?;
@@ -261,6 +264,7 @@ pub async fn read_claude_credentials(source: &CredentialSource) -> Option<Claude
         expires_at: oauth.get("expiresAt").and_then(Value::as_f64),
         has_refresh: refresh.is_some(),
         refresh_hash: refresh.map(js::sha256_hex),
+        refresh_expires_at: oauth.get("refreshTokenExpiresAt").and_then(Value::as_f64).filter(|v| v.is_finite() && *v > 0.0),
         plan: claude_plan_label(oauth.get("subscriptionType"), oauth.get("rateLimitTier")),
     })
 }

@@ -49,6 +49,7 @@ pub fn sanitize_usage(raw: &Value) -> Option<ProviderUsage> {
         retry_at: stamp(raw.get("retryAt")),
         active: raw.get("active") == Some(&Value::Bool(true)),
         held_by: raw.get("heldBy").and_then(Value::as_str).and_then(HeldBy::parse),
+        login_expires_at: stamp(raw.get("loginExpiresAt")),
     })
 }
 

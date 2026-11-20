@@ -16,7 +16,9 @@ use super::credentials::{
     read_cleared_claude_login, read_codex_credentials,
 };
 use super::parse::{parse_claude_usage, parse_codex_plan, parse_codex_rate_limits};
+use super::subscription::parse_profile;
 use super::types::{Provider, ProviderUsage, Source, Status, held_by_of};
+use crate::identity::AccountIdentity;
 use crate::refresh::RefreshOutcome;
 use crate::refresh::renew::TokenFetch;
 use crate::refs::AccountRef;
@@ -38,6 +40,8 @@ pub struct FetcherDeps {
     pub now: Arc<dyn Fn() -> f64 + Send + Sync>,
     pub codex_home: Arc<dyn Fn() -> PathBuf + Send + Sync>,
     pub claude_url: String,
+    /// The OAuth profile, read only after a usage 403 (1.2.6: a lapsed subscription).
+    pub claude_profile_url: String,
     pub codex_url: String,
     /// Renews the tokens of a managed Claude profile (`usageDeps.refreshClaude`, with the gates).
     pub refresh_claude: Option<RenewFn>,
@@ -130,11 +134,17 @@ pub async fn fetch_claude(deps: &FetcherDeps, r: &AccountRef) -> FetchResult {
         return FetchResult::of(with(&u, Status::Expired, Some("login-dead")));
     };
     let identity = read_claude_identity(&source);
+    let owner = AccountIdentity {
+        account_uuid: identity.account_uuid.clone(),
+        organization_uuid: identity.organization_uuid.clone(),
+        ..AccountIdentity::default()
+    };
     let mut known = base;
     known.plan = credentials.plan.clone();
     known.email = identity.email;
     known.org = identity.org;
     known.held_by = held_by;
+    known.login_expires_at = credentials.refresh_expires_at;
     // A saved copy of a login Claude Code cleared as dead (`deadTokens`): sign-in expired, nothing is sent anywhere.
     if !is_main
         && let Some(dead) = r.dead_tokens.as_deref()
@@ -226,9 +236,23 @@ pub async fn fetch_claude(deps: &FetcherDeps, r: &AccountRef) -> FetchResult {
                 response = request(&credentials).await?;
             }
         }
-        // 403 = access denied (a paused subscription, an organisation policy), not a dead sign-in.
+        // 403 = access denied (a paused subscription, an organisation policy), not a dead sign-in. 1.2.6: the profile tells
+        // a lapsed subscription apart, read with the token that was just accepted as valid (never renewed for this).
         if response.status == 403 {
-            return Ok(FetchResult::of(with(&known, Status::Forbidden, Some("http-403"))));
+            let mut u = with(&known, Status::Forbidden, Some("http-403"));
+            u.login_expires_at = credentials.refresh_expires_at;
+            if let Some(profile) = read_profile(deps, &credentials.access_token).await
+                && profile.belongs_to(&owner)
+            {
+                if profile.lapsed() {
+                    u.status = Status::Lapsed;
+                    u.error = Some("subscription-lapsed".into());
+                    u.plan = Some("Free".into());
+                } else {
+                    u.plan = Some(profile.label());
+                }
+            }
+            return Ok(FetchResult::of(u));
         }
         if response.status == 401 {
             return Ok(FetchResult::of(with(&known, Status::Expired, Some("http-401"))));
@@ -244,12 +268,23 @@ pub async fn fetch_claude(deps: &FetcherDeps, r: &AccountRef) -> FetchResult {
             Some(windows) => {
                 let mut u = with(&known, Status::Ok, None);
                 u.windows = windows;
+                u.login_expires_at = credentials.refresh_expires_at;
                 FetchResult::of(u)
             }
         })
     }
     .await;
     result.unwrap_or_else(|Failure::Kind(kind)| FetchResult::of(with(&known, Status::Error, Some(kind))))
+}
+
+/// One read of the OAuth profile; any failure (network, status, body) is no answer.
+async fn read_profile(deps: &FetcherDeps, access_token: &str) -> Option<super::subscription::Profile> {
+    let response =
+        get(deps, unimux_net::calls::claude_profile(&deps.claude_profile_url, access_token, &deps.user_agent)).await.ok()?;
+    if !response.ok() {
+        return None;
+    }
+    parse_profile(&json_body(&response).ok()?)
 }
 
 /// `fetchCodex(deps, ref)`.

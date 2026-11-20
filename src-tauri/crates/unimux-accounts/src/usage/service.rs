@@ -37,6 +37,10 @@ pub const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 const CACHE_VERSION: i64 = 2;
 /// A 403 does not go away in minutes: the account is asked again after this.
 const FORBIDDEN_HOLD_MS: f64 = 30.0 * 60_000.0;
+/// 1.2.6: a lapsed subscription changes on a billing cadence: it is asked again after this (a renewal comes back the same day).
+pub const LAPSED_HOLD_MS: f64 = 6.0 * 3_600_000.0;
+/// The hold reason of a lapsed subscription (the fetcher's `error`).
+const LAPSED: &str = "subscription-lapsed";
 /// The card id of the live Claude login in 0.9.0; as a refresh subject it means the live Claude card.
 pub const LIVE_CARD: &str = "claude:main";
 
@@ -393,7 +397,7 @@ impl UsageService {
         .shared()
     }
 
-    /// The refresh button: reads every account now (only one read in the last EAGER_GUARD_MS and a rate-limit hold are
+    /// The refresh button (and, 1.2.6, the first run of the process): reads every account now (only one read in the last EAGER_GUARD_MS and a rate-limit hold are
     /// skipped) and resolves once all reads finished. A run already in flight is followed by one.
     pub fn refresh_now(self: &Arc<Self>) -> BoxFuture<'static, UsageState> {
         if !(self.o.enabled)() {
@@ -444,15 +448,18 @@ impl UsageService {
 
     async fn run(self: &Arc<Self>, manual: bool) -> UsageState {
         let started = self.now();
-        let (subjects, eager) = {
+        let (subjects, eager, manual) = {
             let mut g = self.inner.lock();
             g.last_run = started;
             let subjects = std::mem::take(&mut g.subjects);
             // The first run of this process and the refresh button read every account now (only the short guard).
             let eager = g.eager_requested || g.first_run;
+            // 1.2.6: the first run is also manual: holds restored from the cache (an error backoff, a 403) do not keep the
+            // numbers after a start stale; a rate-limit hold is still respected.
+            let manual = manual || g.first_run;
             g.eager_requested = false;
             g.first_run = false;
-            (subjects, eager)
+            (subjects, eager, manual)
         };
         let spacing = self.o.min_identity_gap_ms;
         let gap = if eager { EAGER_GUARD_MS.min(spacing) } else { spacing };
@@ -645,12 +652,15 @@ impl UsageService {
         Self::verify_legacy_live(&mut g, &key, &read);
         let failed = read.status == Status::Error || result.failed;
         let forbidden = read.status == Status::Forbidden;
+        let lapsed = read.status == Status::Lapsed;
         let previous_failures = hold.as_ref().map_or(0, |h| h.failures);
         let retry_at = if failed {
             Some(self.start_backoff(&mut g, &key, now, previous_failures, result.retry_after_ms, read.error.clone()))
         } else if forbidden {
             let error = read.error.clone().unwrap_or_else(|| "http-403".into());
             Some(self.start_backoff(&mut g, &key, now, previous_failures, Some(FORBIDDEN_HOLD_MS), Some(error)))
+        } else if lapsed {
+            Some(self.start_backoff(&mut g, &key, now, previous_failures, Some(LAPSED_HOLD_MS), Some(LAPSED.into())))
         } else {
             g.backoff.remove(&key);
             None
@@ -665,7 +675,8 @@ impl UsageService {
         } else {
             g.stamps.remove(&key);
         }
-        if matches!(usage.status, Status::Ok | Status::SignedOut | Status::ApiKey) {
+        // A lapsed subscription has no limits: its old numbers are not kept (they would only look like an unused account).
+        if matches!(usage.status, Status::Ok | Status::SignedOut | Status::ApiKey | Status::Lapsed) {
             g.providers.insert(key, usage);
             return;
         }
@@ -715,7 +726,15 @@ impl UsageService {
             let provider = Provider::parse(&r.provider).unwrap_or(Provider::Claude);
             ProviderUsage::new(&r.id, provider, Status::Error, hold.attempt_at.unwrap_or(now), Source::Cache)
         });
-        u.status = if error == "http-403" { Status::Forbidden } else { Status::Error };
+        u.status = match error.as_str() {
+            "http-403" => Status::Forbidden,
+            LAPSED => Status::Lapsed,
+            _ => Status::Error,
+        };
+        if u.status == Status::Lapsed {
+            u.windows.clear();
+            u.source = Source::Cache;
+        }
         u.error = Some(error.clone());
         if let Some(a) = hold.attempt_at {
             u.attempt_at = Some(a);
@@ -819,8 +838,10 @@ impl UsageService {
         };
         for (key, entry) in entries {
             let usage = sanitize_usage(&entry);
-            // An expired sign-in survives a restart as such: its card says "Sign-in expired" at once (1.1.1).
-            let sign_in = !legacy && usage.as_ref().is_some_and(|u| matches!(u.status, Status::Expired | Status::Elsewhere));
+            // An expired sign-in survives a restart as such: its card says "Sign-in expired" at once (1.1.1); so does a lapsed
+            // subscription (1.2.6).
+            let sign_in = !legacy
+                && usage.as_ref().is_some_and(|u| matches!(u.status, Status::Expired | Status::Elsewhere | Status::Lapsed));
             let Some(usage) = usage else { continue };
             if key.is_empty() || (usage.windows.is_empty() && !sign_in) {
                 continue;
@@ -886,7 +907,7 @@ impl UsageService {
                 .iter()
                 .filter_map(|k| {
                     let u = g.providers.get(k)?;
-                    let kept = !u.windows.is_empty() || matches!(u.status, Status::Expired | Status::Elsewhere);
+                    let kept = !u.windows.is_empty() || matches!(u.status, Status::Expired | Status::Elsewhere | Status::Lapsed);
                     kept.then(|| {
                         let mut m = Map::new();
                         m.insert("key".into(), k.clone().into());

@@ -190,6 +190,12 @@ impl Hub {
                 codex_home: Arc::new(move || creds.codex_home()),
                 // MC_USAGE_*_URL: dev-overrides builds only (release builds see None).
                 claude_url: overrides.usage_claude_url.clone().unwrap_or_else(|| unimux_net::calls::CLAUDE_USAGE_URL.to_string()),
+                // A dev build that points the usage read elsewhere asks that same server for the profile (`.../profile`).
+                claude_profile_url: overrides
+                    .usage_claude_url
+                    .as_deref()
+                    .and_then(|u| u.rsplit_once('/').map(|(dir, _)| format!("{dir}/profile")))
+                    .unwrap_or_else(|| unimux_net::calls::CLAUDE_PROFILE_URL.to_string()),
                 codex_url: overrides.usage_codex_url.clone().unwrap_or_else(|| unimux_net::calls::CODEX_USAGE_URL.to_string()),
                 refresh_claude: Some(fetch_claude_fn),
                 sleep: Arc::new(|d| tokio::time::sleep(d).boxed()),

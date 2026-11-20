@@ -2,10 +2,11 @@
 import type { AccountNotice } from './accounts';
 import type { SwitchOffer } from './autoSwitch';
 export type UsageProvider = 'claude' | 'codex';
-export type UsageStatus = 'ok' | 'signedOut' | 'expired' | 'dormant' | 'apiKey' | 'error' | 'elsewhere' | 'forbidden';
+export type UsageStatus = 'ok' | 'signedOut' | 'expired' | 'dormant' | 'apiKey' | 'error' | 'elsewhere' | 'forbidden' | 'lapsed';
 /* `dormant`: the main Claude login's access token is past its expiry but a refresh token exists; Claude Code renews it on next use. Not an error. */
 /* `elsewhere`: a saved account whose tokens this app must not renew (R6) and whose access token ran out. */
 /* forbidden: the usage endpoint answered 403 (e.g. a paused subscription); the sign-in itself is valid. */
+/* lapsed (1.2.6): a 403 and the account's OAuth profile says its subscription lapsed (canceled, free tier): no limits to show. */
 export type UsageSource = 'live' | 'log' | 'cache';
 
 export interface UsageWindow {
@@ -59,6 +60,8 @@ export interface ProviderUsage {
   active?: boolean;
   /** Why this saved account's tokens are not renewed here: the live login, cswap or an outside switch holds the newest copy. */
   heldBy?: 'live' | 'cswap' | 'switched-out';
+  /** 1.2.6: epoch ms when the stored Claude login ends (`refreshTokenExpiresAt`); absent when the file does not say. */
+  loginExpiresAt?: number;
 }
 
 const HELD_BY = { 'held-by-live': 'live', 'held-by-cswap': 'cswap', 'switched-out': 'switched-out' } as const;
@@ -75,7 +78,7 @@ export function heldByOf(renew: AccountRef['renew']): ProviderUsage['heldBy'] {
  */
 export function makeMainOffered(usage: Pick<ProviderUsage, 'provider' | 'managed' | 'active' | 'heldBy'> & { status?: UsageStatus }): boolean {
   // An expired sign-in (also a held copy whose access token ran out) cannot become the main one: its card offers signing in again.
-  return usage.provider === 'claude' && !!usage.managed && !usage.active && usage.status !== 'expired' && usage.status !== 'elsewhere' && (!usage.heldBy || usage.heldBy === 'cswap');
+  return usage.provider === 'claude' && !!usage.managed && !usage.active && usage.status !== 'expired' && usage.status !== 'elsewhere' && usage.status !== 'lapsed' && (!usage.heldBy || usage.heldBy === 'cswap');
 }
 
 /**
@@ -163,13 +166,15 @@ export function shortAccountName(email: string | undefined, fallback: string, ma
  *   through a new sign-in: a rejected renewal, a main login Claude Code cleared as dead, a dead copy, and a saved copy the
  *   app may not renew (switched out elsewhere, or a copy cswap also holds) whose access token ran out;
  * - `unavailable`: no numbers right now (temporary failure, access denied), one short line;
- * - `apiKey`: Codex with an API key, which has no limits.
+ * - `apiKey`: Codex with an API key, which has no limits;
+ * - `lapsed` (1.2.6): the subscription lapsed - no limits, the card offers removing the account.
  */
-export type CardState = 'ok' | 'stale' | 'expired' | 'unavailable' | 'apiKey';
+export type CardState = 'ok' | 'stale' | 'expired' | 'unavailable' | 'apiKey' | 'lapsed';
 
 export function cardState(usage: Pick<ProviderUsage, 'status' | 'windows' | 'source' | 'heldBy'>): CardState {
   if (usage.status === 'apiKey') return 'apiKey';
   if (usage.status === 'expired') return 'expired';
+  if (usage.status === 'lapsed') return 'lapsed';
   // Held only by the live login (its numbers are on the main card) is not a sign-in problem.
   if (usage.status === 'elsewhere' && usage.heldBy !== 'live') return 'expired';
   if (!usage.windows.length) return 'unavailable';
@@ -178,7 +183,7 @@ export function cardState(usage: Pick<ProviderUsage, 'status' | 'windows' | 'sou
 
 /** Accounts that show numbers: not signed out, not an expired sign-in (old numbers never pass as current), with windows or ok. */
 export function summaryAccounts(providers: ProviderUsage[]): ProviderUsage[] {
-  return providers.filter((u) => u.status !== 'signedOut' && u.status !== 'apiKey' && cardState(u) !== 'expired' && (u.status === 'ok' || u.windows.length > 0));
+  return providers.filter((u) => u.status !== 'signedOut' && u.status !== 'apiKey' && cardState(u) !== 'expired' && cardState(u) !== 'lapsed' && (u.status === 'ok' || u.windows.length > 0));
 }
 
 /** "Claude 17% · Claude 40% · Codex 8%"; several Claude accounts are told apart by the e-mail name. Empty when nothing to show. */
@@ -253,8 +258,29 @@ export function usageDiagnostics(usage: ProviderUsage, nowMs: number, label: str
     `last attempt: ${age(usage.attemptAt)}`,
     `next attempt: ${usage.retryAt === undefined ? 'n/a' : usage.retryAt <= nowMs ? 'due' : `in ${formatDuration((usage.retryAt - nowMs) / 1000)}`}`,
     `windows: ${usage.windows.length ? usage.windows.map((w) => `${w.id} ${Math.round(w.usedPercent)}%`).join(', ') : 'none'}`,
+    `login ends: ${usage.loginExpiresAt === undefined ? 'n/a' : usage.loginExpiresAt <= nowMs ? 'passed' : `in ${formatDuration((usage.loginExpiresAt - nowMs) / 1000)}`}`,
   ].join('\n');
 }
+
+/** 1.2.6: how long before the stored login ends the card warns ("Sign in again in 5 d 12 h"). */
+export const LOGIN_END_WARN_MS = 7 * 86_400_000;
+
+/**
+ * 1.2.6: the heads-up about a stored Claude login that ends soon (`soon`, with the time left) or already ended (`ended`);
+ * undefined when the file does not say, the end is more than a week away, or the card already says the sign-in expired.
+ */
+export function loginEndNotice(usage: Pick<ProviderUsage, 'provider' | 'status' | 'windows' | 'source' | 'loginExpiresAt' | 'heldBy'>, nowMs: number): { kind: 'soon'; leftMs: number } | { kind: 'ended' } | undefined {
+  const end = usage.loginExpiresAt;
+  if (usage.provider !== 'claude' || end === undefined || !Number.isFinite(end) || end <= 0) return undefined;
+  // An expired sign-in already offers signing in again; a copy held by the live login is told on the main card.
+  if (cardState(usage) === 'expired' || usage.heldBy === 'live') return undefined;
+  const left = end - nowMs;
+  if (left <= 0) return { kind: 'ended' };
+  return left <= LOGIN_END_WARN_MS ? { kind: 'soon', leftMs: left } : undefined;
+}
+
+/** The card states whose card can be removed from the panel: an expired sign-in and (1.2.6) a lapsed subscription. */
+export const removableCardState = (state: CardState): boolean => state === 'expired' || state === 'lapsed';
 
 /**
  * 1.2.5: "Usuń konto" on the card of an expired main login (Claude Code's or Codex CLI's own sign-in, which the app does not
@@ -266,10 +292,10 @@ export const removedCardKey = (u: Pick<ProviderUsage, 'accountId' | 'email'>): s
 /** The cards to show, and the removed keys still worth keeping (a key whose login works again, or holds another account, goes). */
 export function withoutRemovedCards(list: ProviderUsage[], removed: readonly string[]): { cards: ProviderUsage[]; removed: string[] } {
   const keys = new Set(removed);
-  const cards = list.filter((u) => !(keys.has(removedCardKey(u)) && cardState(u) === 'expired'));
+  const cards = list.filter((u) => !(keys.has(removedCardKey(u)) && removableCardState(cardState(u))));
   const kept = removed.filter((key) => {
     const card = list.find((u) => key.startsWith(`${u.accountId}|`));
-    return !card || (removedCardKey(card) === key && cardState(card) === 'expired');
+    return !card || (removedCardKey(card) === key && removableCardState(cardState(card)));
   });
   return { cards, removed: kept };
 }
