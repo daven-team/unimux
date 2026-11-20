@@ -231,7 +231,7 @@ pub fn normalize_auto_switch(v: Option<&Value>) -> Value {
     let r = r.as_ref();
     let d = default_auto_switch();
     let cooldown = js::get(r, "cooldownMinutes");
-    json!({
+    let mut out = json!({
         "enabled": bool_or(js::get(r, "enabled"), false),
         "codex": bool_or(js::get(r, "codex"), false),
         "fiveHour": window(js::get(r, "fiveHour"), &d["fiveHour"]),
@@ -241,7 +241,12 @@ pub fn normalize_auto_switch(v: Option<&Value>) -> Value {
         "target": per_provider(js::get(r, "target")),
         "primary": per_provider(js::get(r, "primary")),
         "returnHome": bool_or(js::get(r, "returnHome"), true),
-    })
+    });
+    // 1.2.6: the candidate choice is written only when it is not the default ("most room"), so older states stay unchanged.
+    if js::string(js::get(r, "strategy")) == Some("weekly-first") {
+        out["strategy"] = Value::from("weekly-first");
+    }
+    out
 }
 
 pub fn normalize_delegation(v: Option<&Value>) -> Value {
@@ -329,4 +334,28 @@ pub fn normalize_strip_scope(v: Option<&Value>) -> Value {
 
 pub fn normalize_background_load(v: Option<&Value>) -> Value {
     if one_of(v, &["visible", "project", "all"]) { v.cloned().unwrap_or(Value::Null) } else { Value::from("project") }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auto_switch_strategy_is_kept_only_when_not_the_default() {
+        // A state from before 1.2.6 (and every other value) normalizes exactly as before: no `strategy` key.
+        for strategy in [None, Some(json!("room")), Some(json!("x")), Some(json!(1))] {
+            let mut input = json!({ "enabled": true, "returnHome": false });
+            if let Some(s) = strategy {
+                input["strategy"] = s;
+            }
+            let out = normalize_auto_switch(Some(&input));
+            assert!(out.get("strategy").is_none(), "{out}");
+            assert_eq!(out["returnHome"], json!(false));
+        }
+        let out = normalize_auto_switch(Some(&json!({ "strategy": "weekly-first" })));
+        assert_eq!(out["strategy"], json!("weekly-first"));
+        // After every other key, so the rest of the object keeps its order.
+        assert_eq!(out.as_object().unwrap().keys().last().map(String::as_str), Some("strategy"));
+        assert!(default_auto_switch().get("strategy").is_none());
+    }
 }

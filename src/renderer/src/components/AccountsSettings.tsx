@@ -4,7 +4,7 @@ import { Select } from './Select';
 import { SettingRow, SettingsGroup } from './SettingRow';
 import { PercentSlider } from './PercentSlider';
 import type { LimitAlertSettings, LimitWindowAlert } from '../../../shared/alerts';
-import { AUTO_SWITCH_COOLDOWNS, enableAutoSwitch, type AutoSwitchSettings } from '../../../shared/autoSwitch';
+import { AUTO_SWITCH_COOLDOWNS, enableAutoSwitch, strategyOf, type AutoSwitchSettings } from '../../../shared/autoSwitch';
 import { USAGE_INTERVALS_MINUTES, type UsageProvider } from '../../../shared/usage';
 import { updateSettings } from '../../../shared/state';
 import { useUsage } from '../usage';
@@ -28,6 +28,7 @@ export function AccountsSettings() {
     update((st) => updateSettings(st, { alerts: { ...st.settings.alerts, limits: { ...st.settings.alerts.limits, ...change(st.settings.alerts.limits) } } }));
   const setAutoSwitch = (change: (current: AutoSwitchSettings) => Partial<AutoSwitchSettings>) =>
     update((st) => updateSettings(st, { accountSwitch: { ...st.settings.accountSwitch, ...change(st.settings.accountSwitch) } }));
+  const autoPick = strategyOf(autoSwitch) === 'weekly-first' ? tr('Konto z najbliższym resetem tygodniowym') : tr('Konto z największym zapasem');
   const notAvailable = showAiUsage ? undefined : tr('Działa tylko przy włączonym panelu „Konta i limity”.');
 
   /** One threshold row: the slider (any whole percent) and the window's own switch. */
@@ -84,7 +85,14 @@ export function AccountsSettings() {
           <option value="switch">{tr('Przełącz od razu')}</option>
         </Select>
       </SettingRow>
-      {accountSelect('claude', 'target', tr('Przełączaj na'), tr('Konto z największym zapasem'))}
+      {/* 1.2.6: one candidate choice for Claude and Codex; "most room" is the default and is not written. */}
+      <SettingRow title={tr('Wybór konta')} htmlFor="settings-switch-strategy" hint={tr('Dotyczy kont Claude i Codex, gdy kilka ma zapas. Najwcześniejszy reset tygodniowy najpierw zużywa limit, który i tak by przepadł (konto z co najmniej 10 punktami zapasu do progów ma pierwszeństwo). Konto wybrane w „Przełączaj na” zawsze wygrywa. Gdy konto główne wyczerpie limit, a wszystkie konta są ponad progami, aplikacja przełącza na konto z największym zapasem (co najmniej 3 punkty).')}>
+        <Select id="settings-switch-strategy" className="select" value={strategyOf(autoSwitch)} onChange={(e) => { const strategy = e.target.value === 'weekly-first' ? 'weekly-first' as const : undefined; setAutoSwitch(() => ({ strategy })); }}>
+          <option value="room">{tr('Najwięcej zapasu')}</option>
+          <option value="weekly-first">{tr('Najpierw konto, którego limit tygodniowy resetuje się najwcześniej')}</option>
+        </Select>
+      </SettingRow>
+      {accountSelect('claude', 'target', tr('Przełączaj na'), autoPick)}
       {accountSelect('claude', 'primary', tr('Konto podstawowe'), tr('Brak'))}
       <SettingRow title={tr('Wracaj na konto podstawowe po resecie')} htmlFor="settings-switch-return" hint={tr('Gdy konto podstawowe opuszczone z powodu limitu znowu jest poniżej progów po swoim resecie.')}>
         <input id="settings-switch-return" className="setting-switch" type="checkbox" role="switch" checked={autoSwitch.returnHome} onChange={(e) => { const returnHome = e.target.checked; setAutoSwitch(() => ({ returnHome })); }} />
@@ -97,7 +105,7 @@ export function AccountsSettings() {
       <SettingRow title={tr('Także konta Codex')} htmlFor="settings-switch-codex" hint={tr('Konta Codex zapisane w aplikacji. Otwarte sesje Codex mogą korzystać z poprzedniego konta, dopóki nie uruchomisz ich ponownie.')}>
         <input id="settings-switch-codex" className="setting-switch" type="checkbox" role="switch" checked={autoSwitch.codex} onChange={(e) => { const codex = e.target.checked; setAutoSwitch(() => ({ codex })); }} />
       </SettingRow>
-      {autoSwitch.codex && accountSelect('codex', 'target', `Codex: ${tr('Przełączaj na')}`, tr('Konto z największym zapasem'))}
+      {autoSwitch.codex && accountSelect('codex', 'target', `Codex: ${tr('Przełączaj na')}`, autoPick)}
       {autoSwitch.codex && accountSelect('codex', 'primary', `Codex: ${tr('Konto podstawowe')}`, tr('Brak'))}
     </SettingsGroup>
     {/* The warnings are notifications: the alerts master switch and quiet hours (Powiadomienia i dźwięki) still silence them. */}
