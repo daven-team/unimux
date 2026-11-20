@@ -293,6 +293,24 @@ fn ts_make_main_works_over_a_cleared_main_login() {
     assert!(s.refresh_calls().is_empty());
 }
 
+/// The other shapes of the empty shell a failed refresh leaves (cswap 0.30 #544): tokens nulled or gone, `loginEnded`. The
+/// swap still works and the outgoing account's working saved copy is never overwritten by the shell.
+#[test]
+fn make_main_over_any_empty_shell_keeps_the_outgoing_saved_copy() {
+    for shell in [
+        serde_json::json!({ "claudeAiOauth": { "accessToken": null, "refreshToken": null, "expiresAt": 0, "loginEnded": true } }),
+        serde_json::json!({ "claudeAiOauth": { "expiresAt": 0, "loginEnded": true, "subscriptionType": "team" }, "mcpOAuth": { "server": "m" } }),
+        serde_json::json!({ "claudeAiOauth": { "accessToken": "", "refreshToken": "", "expiresAt": 0, "loginEnded": true } }),
+    ] {
+        let s = setup();
+        put(&s.live_creds(), &shell);
+        let before = text(&s.dir(&s.d).join(".credentials.json"));
+        assert_eq!(s.activate(&s.s), SwapResult::ok(Some("s@x.com".into())), "{shell}");
+        assert_eq!(text(&s.dir(&s.d).join(".credentials.json")), before, "{shell}");
+        assert_eq!(json(&s.live_creds())["claudeAiOauth"], creds("S", FUTURE)["claudeAiOauth"], "{shell}");
+    }
+}
+
 /// accounts-dead-login "works when the credentials file is gone entirely; the account keeps its copy unmarked (no proof it
 /// is dead)", "works with no account in the config either (signed out), creating no record", "still saves an expired but
 /// renewable main login into its record (a valid token family is never lost)"

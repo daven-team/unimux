@@ -248,3 +248,26 @@ fn held_tokens_are_never_copied_and_the_hold_ends_when_the_live_login_changes() 
     assert_eq!(fx.resync(&p, None, &RealSwapFs).unwrap(), ResyncResult::Unchanged);
     assert_eq!(fx.store.get(&p).unwrap().held_tokens, None);
 }
+
+/// The empty shell a failed refresh leaves behind (cswap 0.30 #544 refuses to save it): tokens emptied, nulled or gone, with
+/// `expiresAt: 0` and other keys such as `loginEnded`. It is never copied over the record's working saved copy.
+#[test]
+fn an_empty_shell_left_by_a_failed_refresh_never_overwrites_the_saved_copy() {
+    let fx = Fx::new();
+    let p = fx.add();
+    fx.put_live("a@x.com", "ua", "1");
+    assert_eq!(fx.resync(&p, None, &RealSwapFs).unwrap(), ResyncResult::Copied);
+    let saved = fx.own(&p, ".credentials.json").unwrap();
+    for shell in [
+        r#"{"claudeAiOauth":{"accessToken":"","refreshToken":"","expiresAt":0,"loginEnded":true}}"#,
+        r#"{"claudeAiOauth":{"accessToken":null,"refreshToken":null,"expiresAt":0}}"#,
+        r#"{"claudeAiOauth":{"expiresAt":0,"loginEnded":true},"mcpOAuth":{"s":1}}"#,
+        r#"{"claudeAiOauth":{"accessToken":"fake-acc-2","refreshToken":"","expiresAt":0}}"#,
+        r#"{"mcpOAuth":{"s":1}}"#,
+    ] {
+        std::fs::write(&fx.paths.credentials, shell).unwrap();
+        let r = fx.resync(&p, None, &RealSwapFs).unwrap();
+        assert!(matches!(r, ResyncResult::Dead | ResyncResult::Missing), "{shell}: {r:?}");
+        assert_eq!(fx.own(&p, ".credentials.json").as_deref(), Some(saved.as_str()), "{shell}");
+    }
+}

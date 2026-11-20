@@ -319,6 +319,40 @@ mod tests {
         assert_eq!(read_cswap_roster(&path), CswapRoster::UNREADABLE);
     }
 
+    /// cswap 1.1.0 adds per-account settings (alias, priority, threshold, disabled), plan, API-key and setup-token slots
+    /// (placeholder e-mails, `kind`) beside the identity keys; the roster still parses, and a disabled slot still holds its
+    /// copy of the tokens (cswap may enable it again at any time).
+    #[test]
+    fn reads_a_cswap_1_1_0_roster() {
+        let home = tempfile::tempdir().unwrap();
+        let path = cswap_roster_path(home.path(), None, Os::Windows);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            &path,
+            r#"{
+  "activeAccountNumber": 2,
+  "lastUpdated": "2026-11-18T10:00:00Z",
+  "sequence": [1, 2, 3, 4],
+  "accounts": {
+    "1": {"email": "a@x.com", "uuid": "ua", "organizationUuid": "oa", "organizationName": "A org", "added": "2026-01-01T00:00:00Z",
+          "alias": "work", "priority": 2, "threshold": 85.5, "disabled": true, "plan": {"plan": "max", "fetchedAt": 1}},
+    "2": {"email": "b@x.com", "uuid": "ub", "organizationUuid": "", "organizationName": "", "added": "x", "priority": -1},
+    "3": {"email": "token-3@token.local", "uuid": "", "organizationUuid": "", "organizationName": "", "added": "x", "kind": "api_key"},
+    "4": {"email": "setup-4@token.local", "uuid": "", "organizationUuid": "", "organizationName": "", "added": "x", "threshold": null}
+  }
+}"#,
+        )
+        .unwrap();
+        let roster = read_cswap_roster(&path);
+        let CswapRoster::Present(Some(a)) = &roster else { panic!("{roster:?}") };
+        assert_eq!(a.len(), 4);
+        assert_eq!((a[0].email.as_deref(), a[0].account_uuid.as_deref()), (Some("a@x.com"), Some("ua")));
+        assert_eq!(a[0].organization_uuid.as_deref(), Some("oa"));
+        assert!(cswap_holds(&roster, &id(Some("A@x.com"), Some("ua")))); // disabled, still held
+        assert!(cswap_holds(&roster, &id(Some("b@x.com"), Some("ub"))));
+        assert!(!cswap_holds(&roster, &id(Some("c@x.com"), Some("uc")))); // token slots match no real login
+    }
+
     #[test]
     fn holds_unless_proven_different() {
         let roster = CswapRoster::Present(Some(vec![id(Some("x@x.com"), None)]));
