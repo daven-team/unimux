@@ -70,4 +70,14 @@ export const accountSwitchMessages = {
   'Pilnuje': ['Watching', 'Wacht', 'Vigila', 'Surveille', 'Vigia'],
   'Switcher pilnuje kont': ['The Switcher is watching the accounts', 'Der Switcher überwacht die Konten', 'El Switcher vigila las cuentas', 'Le Switcher surveille les comptes', 'O Switcher vigia as contas'],
   'Kliknij, aby zmienić ustawienia.': ['Click to change the settings.', 'Klicken, um die Einstellungen zu ändern.', 'Haz clic para cambiar los ajustes.', 'Cliquez pour modifier les réglages.', 'Clique para alterar as definições.'],
+  // 1.2.6: `continue` after Claude Code stopped its automatic continue because the login changed (shared/loginResume.ts).
+  'Po zmianie konta wznawiaj sesje wstrzymane przez Claude Code': ['Resume sessions Claude Code paused after an account change', 'Von Claude Code angehaltene Sitzungen nach einem Kontowechsel fortsetzen', 'Reanudar las sesiones que Claude Code pausó tras un cambio de cuenta', 'Reprendre les sessions mises en pause par Claude Code après un changement de compte', 'Retomar as sessões que o Claude Code pausou após uma troca de conta'],
+  'Gdy Claude Code zatrzyma automatyczne wznowienie po limicie, bo zmieniło się konto, aplikacja wyśle „continue”, jeśli konto ma zapas, a sesja czeka z pustym polem.': [
+    'When Claude Code stops its automatic continue after a limit because the account changed, the app sends “continue” if the account has room and the session waits with an empty input.',
+    'Wenn Claude Code das automatische Fortsetzen nach einem Limit stoppt, weil sich das Konto geändert hat, sendet die App „continue“, sofern das Konto Reserve hat und die Sitzung mit leerer Eingabe wartet.',
+    'Cuando Claude Code detiene la continuación automática tras un límite porque cambió la cuenta, la aplicación envía «continue» si la cuenta tiene margen y la sesión espera con la entrada vacía.',
+    'Quand Claude Code arrête la reprise automatique après une limite parce que le compte a changé, l\'application envoie « continue » si le compte a de la marge et que la session attend avec une saisie vide.',
+    'Quando o Claude Code para a continuação automática após um limite porque a conta mudou, a aplicação envia “continue” se a conta tiver margem e a sessão estiver à espera com a entrada vazia.',
+  ],
+  'Konto zmienione - wysłano „continue” do {cell}': ['Account changed - sent “continue” to {cell}', 'Konto gewechselt - „continue“ an {cell} gesendet', 'Cuenta cambiada: se envió «continue» a {cell}', 'Compte changé - « continue » envoyé à {cell}', 'Conta alterada - enviado “continue” para {cell}'],
 } as const;

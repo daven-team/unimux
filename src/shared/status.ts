@@ -102,6 +102,8 @@ export interface HookInfo {
   turn?: string;
   /** notify: what the user is asked (PermissionRequest, AskUserQuestion, Elicitation, a Notification type). */
   need?: 'permission' | 'question' | 'elicitation' | 'input';
+  /** notify (1.2.6): Claude Code stopped its automatic continue because the login changed (shared/loginResume.ts). */
+  loginChanged?: boolean;
   /** notify: fired the moment the question opened (not a Notification that comes ~6 s later), so no answer grace applies. */
   immediate?: boolean;
   /** busy / notify: the tool's name (PreToolUse, PostToolUse, PermissionRequest). */

@@ -11,8 +11,8 @@ import { addToQueue, deliverPrompt, promptPending, typedSinceSettled } from './p
 import { getS, getUi, setUi } from './store';
 import { terminals } from './terminals/TerminalManager';
 
-/** The state of one cell of this window for `text`. */
-function stateHere(cellId: string, text: string): TargetState {
+/** The state of one cell of this window for `text` (also renderer/loginResume.ts). */
+export function stateHere(cellId: string, text: string): TargetState {
   const s = getS();
   const cell = findCell(s, cellId)?.cell;
   if (!cell || cell.ssh || getProfile(s, cell.profileId).cli === 'shell') return 'notStarted';

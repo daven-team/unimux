@@ -6,6 +6,7 @@ import { PercentSlider } from './PercentSlider';
 import type { LimitAlertSettings, LimitWindowAlert } from '../../../shared/alerts';
 import { AUTO_SWITCH_COOLDOWNS, enableAutoSwitch, type AutoSwitchSettings } from '../../../shared/autoSwitch';
 import { USAGE_INTERVALS_MINUTES, type UsageProvider } from '../../../shared/usage';
+import { loginResumeOn } from '../../../shared/loginResume';
 import { updateSettings } from '../../../shared/state';
 import { useUsage } from '../usage';
 import { switchAccounts } from './UsageAutoSwitch';
@@ -99,6 +100,9 @@ export function AccountsSettings() {
       </SettingRow>
       {autoSwitch.codex && accountSelect('codex', 'target', `Codex: ${tr('Przełączaj na')}`, tr('Konto z największym zapasem'))}
       {autoSwitch.codex && accountSelect('codex', 'primary', `Codex: ${tr('Konto podstawowe')}`, tr('Brak'))}
+      <SettingRow title={tr('Po zmianie konta wznawiaj sesje wstrzymane przez Claude Code')} htmlFor="settings-login-resume" hint={tr('Gdy Claude Code zatrzyma automatyczne wznowienie po limicie, bo zmieniło się konto, aplikacja wyśle „continue”, jeśli konto ma zapas, a sesja czeka z pustym polem.')}>
+        <input id="settings-login-resume" className="setting-switch" type="checkbox" role="switch" checked={loginResumeOn(settings)} onChange={(e) => { const resumeAfterLoginChange = e.target.checked; update((st) => updateSettings(st, { resumeAfterLoginChange })); }} />
+      </SettingRow>
     </SettingsGroup>
     {/* The warnings are notifications: the alerts master switch and quiet hours (Powiadomienia i dźwięki) still silence them. */}
     <SettingsGroup title={tr('Ostrzeżenia o limitach')} description={tr('Powiadomienie systemowe, gdy konto Claude lub Codex wykorzysta wybraną część limitu: raz na konto, okno i okres limitu, także po ponownym uruchomieniu aplikacji. Nie dotyczy kont z wygasłym logowaniem. Kliknięcie otwiera panel „Konta i limity”. Obowiązują główny przełącznik i godziny ciszy z sekcji „Powiadomienia i dźwięki”.')}>
