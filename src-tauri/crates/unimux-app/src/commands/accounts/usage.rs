@@ -670,7 +670,7 @@ fn show_switch_notice(ctx: &Arc<AppContext>, event: &SwitchNotice) {
     let Some(os) = ctx.os.get().cloned() else { return };
     let lang = language(ctx);
     let (title, body) = auto_switch_text(event, &lang, now_ms());
-    let offer = matches!(event.kind, NoticeKind::Offer | NoticeKind::ReturnOffer);
+    let offer = event.kind.is_offer();
     let buttons =
         if offer && (cfg!(windows) || cfg!(target_os = "macos")) { vec![switch_button_text(event, &lang)] } else { Vec::new() };
     let weak = Arc::downgrade(ctx);
@@ -687,14 +687,13 @@ fn show_switch_notice(ctx: &Arc<AppContext>, event: &SwitchNotice) {
         tauri::async_runtime::spawn(async move {
             let result = h.auto.accept_offer().await;
             if result.ok {
-                let mut n = SwitchNotice::new(
-                    if event.kind == NoticeKind::ReturnOffer { NoticeKind::Returned } else { NoticeKind::Switched },
-                    event.provider,
-                );
+                let mut n = SwitchNotice::new(event.kind.accepted(), event.provider);
                 n.from_email = event.from_email.clone();
                 n.to_email = result.email.clone().or(event.to_email.clone());
                 n.window = event.window;
                 n.percent = event.percent;
+                n.room = event.room;
+                n.dead = event.dead;
                 show_switch_notice(&c, &n);
             } else {
                 open_panel(&c);

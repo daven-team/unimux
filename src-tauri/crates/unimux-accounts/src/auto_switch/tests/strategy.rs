@@ -86,7 +86,7 @@ fn at_limit_escapes_to_the_account_with_the_most_room_when_all_are_over_the_thre
     ];
     for settings in [on(), weekly()] {
         match plan(&providers, &settings, &AutoSwitchMemory::default(), NOW) {
-            Plan::Act { switch: true, reason: Reason::Limit, trigger: Some(t), candidates, .. } => {
+            Plan::Act { switch: true, reason: Reason::Escape, trigger: Some(t), candidates, .. } => {
                 assert_eq!(keys(&candidates), ["c@x.com", "b@x.com"]);
                 assert_eq!((t.window, t.percent), (WindowId::FiveHour, 100.0));
             }
@@ -135,7 +135,9 @@ async fn an_escape_offer_can_be_accepted() {
     let providers = vec![main_card_of("a@x.com", 100.0, 40.0), card("b@x.com", 96.0, 10.0, P::default())];
     let t = setup(AutoSwitchSettings { mode: Mode::Ask, ..on() }, providers.clone(), &[], false);
     t.switcher.on_state(providers).await;
-    assert_eq!(*t.notices.lock(), ["Offer:b@x.com"]);
+    assert_eq!(*t.notices.lock(), ["EscapeOffer:b@x.com"]);
+    let offer = t.switcher.current_offer().unwrap();
+    assert_eq!((offer.reason, offer.room, offer.to_value()["reason"].as_str()), (Reason::Escape, Some(4.0), Some("escape")));
     assert_eq!(t.switcher.accept_offer().await, SwapResult::ok(Some("b@x.com".into())));
     assert_eq!(*t.swaps.lock(), ["claude:b@x.com"]);
 }

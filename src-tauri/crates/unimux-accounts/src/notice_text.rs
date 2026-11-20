@@ -6,7 +6,7 @@
 //! languages, so the CLDR patterns of those two calls are written out here instead of pulling a date-format engine in; the
 //! table matches Node 26 / ICU 78 (`notice_text::tests::matches_node_intl`, strings taken from Node).
 
-use crate::auto_switch::{NoticeKind, SwitchNotice};
+use crate::auto_switch::{Dead, NoticeKind, SwitchNotice};
 use crate::limit_alerts::LimitNotice;
 use crate::localtime::local_fields;
 use crate::usage::types::{Provider, WindowId};
@@ -145,6 +145,24 @@ pub fn auto_switch_text(event: &SwitchNotice, language: &str, now_ms: f64) -> (S
             }
         }
         NoticeKind::Failed => tr("Nie udało się przełączyć na {to}. Konto główne zostało bez zmian.", &p),
+        NoticeKind::Escaped | NoticeKind::EscapeOffer => {
+            let room = number(event.room.unwrap_or(0.0));
+            let q = [("to", to.as_str()), ("room", room.as_str())];
+            if event.kind == NoticeKind::Escaped {
+                tr("Wszystkie konta są ponad progiem - przełączono na {to}: największy zapas ({room}%).", &q)
+            } else {
+                tr("Wszystkie konta są ponad progiem - największy zapas ma {to} ({room}%). Przełączyć na {to}?", &q)
+            }
+        }
+        NoticeKind::DeadSwitched | NoticeKind::DeadOffer => {
+            let lapsed = event.dead == Some(Dead::Lapsed);
+            match (event.kind == NoticeKind::DeadSwitched, lapsed) {
+                (true, true) => tr("Konto {from} nie działa (subskrypcja wygasła) - przełączono na {to}.", &p),
+                (true, false) => tr("Konto {from} nie działa (odmowa dostępu) - przełączono na {to}.", &p),
+                (false, true) => tr("Konto {from} nie działa (subskrypcja wygasła). Przełączyć na {to}?", &p),
+                (false, false) => tr("Konto {from} nie działa (odmowa dostępu). Przełączyć na {to}?", &p),
+            }
+        }
     };
     (title, body)
 }
@@ -320,6 +338,26 @@ mod tests {
         s.percent = Some(95.0);
         assert_eq!(auto_switch_text(&s, "pl", now).1, "Przełączono na Claude: limit 5 h konta a@x.io wykorzystany w 95%");
         assert_eq!(switch_button_text(&s, "pl"), "Przełącz na Claude");
+        let mut x = SwitchNotice::new(NoticeKind::EscapeOffer, Provider::Claude);
+        x.to_email = Some("b@x.io".into());
+        x.room = Some(4.0);
+        assert_eq!(
+            auto_switch_text(&x, "pl", now).1,
+            "Wszystkie konta są ponad progiem - największy zapas ma b@x.io (4%). Przełączyć na b@x.io?"
+        );
+        x.kind = NoticeKind::Escaped;
+        assert_eq!(
+            auto_switch_text(&x, "en", now).1,
+            "Every account is over its threshold - switched to b@x.io: the most room (4%)."
+        );
+        let mut d = SwitchNotice::new(NoticeKind::DeadSwitched, Provider::Claude);
+        d.from_email = Some("a@x.io".into());
+        d.to_email = Some("b@x.io".into());
+        d.dead = Some(Dead::Lapsed);
+        assert_eq!(auto_switch_text(&d, "pl", now).1, "Konto a@x.io nie działa (subskrypcja wygasła) - przełączono na b@x.io.");
+        d.kind = NoticeKind::DeadOffer;
+        d.dead = Some(Dead::Forbidden);
+        assert_eq!(auto_switch_text(&d, "pl", now).1, "Konto a@x.io nie działa (odmowa dostępu). Przełączyć na b@x.io?");
         assert_eq!(name_of(Some(&"x".repeat(80)), Provider::Claude).len(), 60);
     }
 }

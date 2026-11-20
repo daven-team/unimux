@@ -1,7 +1,8 @@
 //! 1.1.2: switching the main AI account automatically when it nears a limit (ports of src/shared/autoSwitch.ts and
 //! src/main/autoSwitch.ts). The pure part decides (cooldown, no ping-pong, one notice per limit period); [`AutoSwitcher`]
 //! runs it after every new state of the limits, keeps `auto-switch.json` (version 1) and does the switch through the same
-//! "make main" as the card's menu, with the family rules checked again right before it.
+//! "make main" as the card's menu, with the family rules checked again right before it. 1.2.6: a main account that cannot
+//! work ([`dead_main`]: a lapsed subscription, a persisting usage 403) is left like one at its limit.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -200,6 +201,11 @@ const LANDING_ROOM: f64 = 10.0;
 const ESCAPE_MIN_ROOM: f64 = 3.0;
 /// How long a return offer is not repeated.
 const RETURN_OFFER_S: f64 = 5.0 * 3600.0;
+/// A dead main account: a usage 403 counts once the latest refused read came at least this long after the last good one,
+/// i.e. the read after the 30-minute 403 hold was refused again (a one-off 403 never switches).
+pub const FORBIDDEN_DEAD_MS: f64 = 30.0 * 60_000.0;
+/// How long the notice (offer) about a dead main account is not repeated.
+const DEAD_NOTICE_S: f64 = 3.0 * 3600.0;
 
 /// `accountKey`: its e-mail, else its card id (never a token).
 pub fn account_key(usage: &ProviderUsage) -> String {
@@ -270,6 +276,27 @@ pub fn switch_trigger(main: &ProviderUsage, settings: &AutoSwitchSettings, now_m
         }
     }
     found
+}
+
+/// 1.2.6: why the main account cannot work at all (`DeadCause`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Dead {
+    /// The subscription lapsed (`Status::Lapsed`).
+    Lapsed,
+    /// The usage endpoint keeps answering 403 (`Status::Forbidden`, see `FORBIDDEN_DEAD_MS`).
+    Forbidden,
+}
+
+/// `deadMain`: the main account's latest read says it cannot work: a lapsed subscription at once, a 403 once it persists
+/// (the latest read refused and no good read for `FORBIDDEN_DEAD_MS` before it: the read after the 403 hold was refused
+/// again; without any earlier numbers a 403 is never taken as dead). An expired or signed-out login is a different flow
+/// (sign in again) and never counts here.
+pub fn dead_main(main: &ProviderUsage) -> Option<Dead> {
+    match main.status {
+        Status::Lapsed => Some(Dead::Lapsed),
+        Status::Forbidden if main.attempt_at.is_some_and(|at| at - main.fetched_at >= FORBIDDEN_DEAD_MS) => Some(Dead::Forbidden),
+        _ => None,
+    }
 }
 
 fn blocked_by_left(memory: &AutoSwitchMemory, provider: Provider, key: &str, now_ms: f64) -> bool {
@@ -408,7 +435,8 @@ fn at_limit(main: &ProviderUsage, now_ms: f64) -> bool {
 /// thresholds, the accounts over them that still have `ESCAPE_MIN_ROOM` points of room on their fullest window (more than
 /// the main account), most room first, whatever the strategy. Never an expired, dead, unread or used-up copy (`usable_copy`),
 /// never one left because of a limit before it reset (unless `memory` is `None`: the user's own choice); a chosen account
-/// stays the only one looked at. Empty when the main account is not at a limit.
+/// stays the only one looked at. Empty when the main account is not at a limit. A dead main account (`dead_main`) escapes the
+/// same way with any room at all: whatever is left is a gain over an account that cannot work.
 pub fn escape_candidates(
     providers: &[ProviderUsage],
     provider: Provider,
@@ -416,9 +444,12 @@ pub fn escape_candidates(
     memory: Option<&AutoSwitchMemory>,
     now_ms: f64,
 ) -> Vec<ProviderUsage> {
-    let Some(main) = main_card(providers, provider).filter(|m| at_limit(m, now_ms)) else { return Vec::new() };
+    let Some(main) = main_card(providers, provider).filter(|m| at_limit(m, now_ms) || dead_main(m).is_some()) else {
+        return Vec::new();
+    };
     let main_key = account_key(main);
-    let need = room_of(main, now_ms).max(0.0) + ESCAPE_MIN_ROOM;
+    // `usable_copy` already keeps out a used-up window, so every copy left has some room.
+    let need = if dead_main(main).is_some() { 0.0 } else { room_of(main, now_ms).max(0.0) + ESCAPE_MIN_ROOM };
     let mut out: Vec<ProviderUsage> = providers
         .iter()
         .filter(|u| {
@@ -492,6 +523,22 @@ pub enum Reason {
     Limit,
     /// Back to the primary account (no trigger: the main account may be fine).
     Return,
+    /// 1.2.6: the at-limit escape (the account is over its own thresholds but has the most room).
+    Escape,
+    /// 1.2.6: the main account cannot work (`dead_main`; no trigger).
+    Dead(Dead),
+}
+
+impl Reason {
+    /// `SwitchOffer.reason`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Reason::Limit => "limit",
+            Reason::Return => "return",
+            Reason::Escape => "escape",
+            Reason::Dead(_) => "dead",
+        }
+    }
 }
 
 /// `AutoSwitchPlan`.
@@ -524,6 +571,12 @@ fn told(memory: &AutoSwitchMemory, provider: Provider, key: &str, window: Window
 /// `offerKey`.
 pub fn offer_key(kind: &str, key: &str) -> String {
     if kind == "limit" { key.to_string() } else { format!("{kind}:{key}") }
+}
+
+/// The offer about this dead main account was told and its mark (`dead_offer_mark`) has not run out.
+fn told_dead(memory: &AutoSwitchMemory, provider: Provider, key: &str, now_ms: f64) -> bool {
+    let key = offer_key("dead", key);
+    memory.offered.iter().any(|m| m.provider == provider && m.key == key && m.resets_at * 1000.0 > now_ms)
 }
 
 /// `planAutoSwitch`.
@@ -569,10 +622,30 @@ pub fn plan_auto_switch(
             };
         }
     }
-    let Some(trigger) = switch_trigger(from, settings, now_ms) else { return Plan::None(Skip::Below) };
+    let dead = dead_main(from);
+    let trigger = switch_trigger(from, settings, now_ms);
+    if dead.is_none() && trigger.is_none() {
+        return Plan::None(Skip::Below);
+    }
     if cooling {
         return Plan::None(Skip::Cooldown);
     }
+    if let Some(cause) = dead {
+        // 1.2.6: a dead main account is left like one at its limit: the normal choice, else any account with room. Its
+        // offer is told once in a few hours; it gets no "left" mark (a dead copy is never a candidate anyway, and once it
+        // reads fine again it may be returned to).
+        if !switch && told_dead(memory, provider, &key, now_ms) {
+            return Plan::None(Skip::Offered);
+        }
+        let usable = chosen(candidates, settings, provider);
+        let candidates =
+            if usable.is_empty() { escape_candidates(providers, provider, settings, Some(memory), now_ms) } else { usable };
+        if candidates.is_empty() {
+            return Plan::None(Skip::NoCandidate);
+        }
+        return Plan::Act { switch, reason: Reason::Dead(cause), from: from.clone(), trigger: None, candidates };
+    }
+    let Some(trigger) = trigger else { return Plan::None(Skip::Below) };
     if !switch && told(memory, provider, &offer_key("limit", &key), trigger.window, trigger.resets_at) {
         return Plan::None(Skip::Offered);
     }
@@ -582,7 +655,7 @@ pub fn plan_auto_switch(
         // with the most room left takes over (switched or offered like any limit switch).
         let escape = escape_candidates(providers, provider, settings, Some(memory), now_ms);
         if !escape.is_empty() {
-            return Plan::Act { switch, reason: Reason::Limit, from: from.clone(), trigger: Some(trigger), candidates: escape };
+            return Plan::Act { switch, reason: Reason::Escape, from: from.clone(), trigger: Some(trigger), candidates: escape };
         }
         // "All accounts are over the threshold" only when that is known: some other saved account exists and none of them
         // is still waiting for its numbers.
@@ -701,6 +774,11 @@ pub fn return_offer_mark(now_ms: f64) -> (WindowId, f64) {
     (WindowId::FiveHour, (now_ms / 1000.0).floor() + RETURN_OFFER_S)
 }
 
+/// `deadOfferMark`: an offer about a dead main account has no limit period either; it is not repeated for a few hours.
+pub fn dead_offer_mark(now_ms: f64) -> (WindowId, f64) {
+    (WindowId::FiveHour, (now_ms / 1000.0).floor() + DEAD_NOTICE_S)
+}
+
 /// `normalizeAutoSwitchMemory`: damaged entries are dropped.
 pub fn normalize_auto_switch_memory(value: Option<&Value>) -> AutoSwitchMemory {
     let Some(v) = js::record(value) else { return AutoSwitchMemory::default() };
@@ -745,13 +823,18 @@ pub struct SwitchOffer {
     pub from_email: Option<String>,
     pub window: Option<WindowId>,
     pub percent: Option<f64>,
+    /// 1.2.6, `Escape`: the proposed account's room (0-100, rounded).
+    pub room: Option<f64>,
 }
 
 impl SwitchOffer {
     pub fn to_value(&self) -> Value {
         let mut m = Map::new();
         m.insert("provider".into(), self.provider.as_str().into());
-        m.insert("reason".into(), (if self.reason == Reason::Return { "return" } else { "limit" }).into());
+        m.insert("reason".into(), self.reason.as_str().into());
+        if self.reason == Reason::Dead(Dead::Lapsed) {
+            m.insert("lapsed".into(), true.into());
+        }
         m.insert("to".into(), self.to.clone().into());
         if let Some(e) = &self.to_email {
             m.insert("toEmail".into(), e.clone().into());
@@ -764,6 +847,9 @@ impl SwitchOffer {
         }
         if let Some(p) = self.percent {
             m.insert("percent".into(), js::num(p));
+        }
+        if let Some(r) = self.room {
+            m.insert("room".into(), js::num(r));
         }
         Value::Object(m)
     }
@@ -778,6 +864,39 @@ pub enum NoticeKind {
     ReturnOffer,
     Exhausted,
     Failed,
+    /// 1.2.6: the at-limit escape switched / offers (every account is over its thresholds).
+    Escaped,
+    EscapeOffer,
+    /// 1.2.6: the main account cannot work (`SwitchNotice::dead` says why).
+    DeadSwitched,
+    DeadOffer,
+}
+
+impl NoticeKind {
+    /// The notice kinds of `reason`: (offer, switched).
+    pub fn of(reason: Reason) -> (NoticeKind, NoticeKind) {
+        match reason {
+            Reason::Limit => (NoticeKind::Offer, NoticeKind::Switched),
+            Reason::Return => (NoticeKind::ReturnOffer, NoticeKind::Returned),
+            Reason::Escape => (NoticeKind::EscapeOffer, NoticeKind::Escaped),
+            Reason::Dead(_) => (NoticeKind::DeadOffer, NoticeKind::DeadSwitched),
+        }
+    }
+
+    /// An offer (with a "Switch to X" button).
+    pub fn is_offer(self) -> bool {
+        matches!(self, NoticeKind::Offer | NoticeKind::ReturnOffer | NoticeKind::EscapeOffer | NoticeKind::DeadOffer)
+    }
+
+    /// What an accepted offer of this kind did.
+    pub fn accepted(self) -> NoticeKind {
+        match self {
+            NoticeKind::ReturnOffer => NoticeKind::Returned,
+            NoticeKind::EscapeOffer => NoticeKind::Escaped,
+            NoticeKind::DeadOffer => NoticeKind::DeadSwitched,
+            _ => NoticeKind::Switched,
+        }
+    }
 }
 
 /// `SwitchNotice`.
@@ -793,6 +912,10 @@ pub struct SwitchNotice {
     pub resets_at: Option<f64>,
     /// `Exhausted` with a chosen target account.
     pub target_only: bool,
+    /// `Escaped` / `EscapeOffer`: the room of the account switched to (0-100, rounded).
+    pub room: Option<f64>,
+    /// `DeadSwitched` / `DeadOffer`: why the main account cannot work.
+    pub dead: Option<Dead>,
 }
 
 impl SwitchNotice {
@@ -806,6 +929,8 @@ impl SwitchNotice {
             percent: None,
             resets_at: None,
             target_only: false,
+            room: None,
+            dead: None,
         }
     }
 }
@@ -960,17 +1085,25 @@ impl AutoSwitcher {
         }
         let returning = reason == Reason::Return;
         let from_key = account_key(&from);
+        let (offer_kind, switched_kind) = NoticeKind::of(reason);
+        let dead = match reason {
+            Reason::Dead(cause) => Some(cause),
+            _ => None,
+        };
+        let room_of_target = |to: &ProviderUsage| (reason == Reason::Escape).then(|| js_round(room_of(to, now)));
         if !switch {
-            // The first candidate the family rules allow is offered; the offer is told once per limit period.
+            // The first candidate the family rules allow is offered; the offer is told once per limit period (a dead main
+            // account's once in a few hours).
             let to = self.first_allowed(provider, &candidates).await;
-            let (window, resets_at) = match (returning, trigger) {
-                (true, _) | (false, None) => return_offer_mark(now),
-                (false, Some(t)) => (t.window, t.resets_at),
+            let (window, resets_at) = match (reason, trigger) {
+                (Reason::Dead(_), _) => dead_offer_mark(now),
+                (Reason::Return, _) | (_, None) => return_offer_mark(now),
+                (_, Some(t)) => (t.window, t.resets_at),
             };
-            let key = if returning {
-                offer_key("return", settings.primary.get(&provider).map_or("", String::as_str))
-            } else {
-                offer_key("limit", &from_key)
+            let key = match reason {
+                Reason::Return => offer_key("return", settings.primary.get(&provider).map_or("", String::as_str)),
+                Reason::Dead(_) => offer_key("dead", &from_key),
+                _ => offer_key("limit", &from_key),
             };
             self.remember(remember_told(&self.memory(), provider, &key, window, resets_at, now));
             let Some(to) = to else { return };
@@ -982,12 +1115,15 @@ impl AutoSwitcher {
                 from_email: from.email.clone(),
                 window: trigger.map(|t| t.window),
                 percent: trigger.map(|t| t.percent),
+                room: room_of_target(&to),
             }));
-            let mut n = SwitchNotice::new(if returning { NoticeKind::ReturnOffer } else { NoticeKind::Offer }, provider);
+            let mut n = SwitchNotice::new(offer_kind, provider);
             n.from_email = from.email.clone();
             n.to_email = to.email.clone();
             n.window = trigger.map(|t| t.window);
             n.percent = trigger.map(|t| t.percent);
+            n.room = room_of_target(&to);
+            n.dead = dead;
             self.tell(&n);
             return;
         }
@@ -1009,13 +1145,15 @@ impl AutoSwitcher {
                 if self.current_offer().is_some_and(|o| o.provider == provider) {
                     self.set_offer(None);
                 }
-                let mut n = SwitchNotice::new(if returning { NoticeKind::Returned } else { NoticeKind::Switched }, provider);
+                let mut n = SwitchNotice::new(switched_kind, provider);
                 n.from_email = from.email.clone();
                 n.to_email = result.email.clone().or(candidate.email.clone());
                 if !returning {
                     n.window = trigger.map(|t| t.window);
                     n.percent = trigger.map(|t| t.percent);
                 }
+                n.room = room_of_target(candidate);
+                n.dead = dead;
                 self.tell(&n);
             } else {
                 let mut n = SwitchNotice::new(NoticeKind::Failed, provider);
@@ -1122,7 +1260,8 @@ impl AutoSwitcher {
         let settings = (self.o.settings)();
         let same_main =
             main.is_some_and(|m| offer.from_email.as_ref().is_none_or(|f| f.is_empty() || account_key(m) == f.to_lowercase()));
-        let reason = offer.reason == Reason::Return || main.is_some_and(|m| switch_trigger(m, &settings, self.now()).is_some());
+        let reason = offer.reason == Reason::Return
+            || main.is_some_and(|m| switch_trigger(m, &settings, self.now()).is_some() || dead_main(m).is_some());
         let target = providers.iter().any(|u| u.account_id == offer.to);
         if !settings.enabled || !same_main || !reason || !target {
             self.set_offer(None);

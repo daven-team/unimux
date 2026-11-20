@@ -316,5 +316,6 @@ async fn tells_exhausted_once_and_switch_now_refuses_over_threshold() {
     assert_eq!(t.switcher.switch_now(Provider::Claude, None).await, SwapResult::ok(Some("b@x.com".into())));
 }
 
+mod dead_main;
 mod strategy;
 mod ts_ports;
