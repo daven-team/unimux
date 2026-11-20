@@ -363,3 +363,45 @@ fn a_real_permission_error_fails_at_once_instead_of_waiting_for_the_timeout() {
     assert!(!ran.get());
     assert!(!dir.path().join(".claude.json.lock").exists());
 }
+
+#[test]
+fn a_stale_lock_is_taken_over_under_claude_swaps_takeover_dir_which_is_removed_afterwards() {
+    let h = home();
+    fs::create_dir(h.primary()).unwrap();
+    age(&h.primary(), Duration::from_secs(61));
+    h.run(&fast(), || ()).unwrap();
+    assert!(!with_suffix(&h.primary(), TAKEOVER_SUFFIX).exists());
+}
+
+#[test]
+fn does_not_take_over_while_another_waiter_holds_the_takeover_dir() {
+    // cswap (0.28+) mid-takeover: its rmdir + mkdir may land any moment, so removing the lock now could remove its fresh one.
+    let h = home();
+    fs::create_dir(h.primary()).unwrap();
+    age(&h.primary(), Duration::from_secs(61));
+    fs::create_dir(with_suffix(&h.primary(), TAKEOVER_SUFFIX)).unwrap();
+    assert!(matches!(h.run(&fast(), || ()), Err(LockError::Timeout(_))));
+    assert!(h.primary().exists());
+}
+
+#[test]
+fn clears_a_takeover_dir_left_by_a_waiter_that_died_and_then_takes_over() {
+    let h = home();
+    fs::create_dir(h.primary()).unwrap();
+    age(&h.primary(), Duration::from_secs(61));
+    let takeover = with_suffix(&h.primary(), TAKEOVER_SUFFIX);
+    fs::create_dir(&takeover).unwrap();
+    age(&takeover, Duration::from_secs(6));
+    h.run(&fast(), || ()).unwrap();
+    assert!(!takeover.exists());
+}
+
+#[test]
+fn the_recheck_inside_the_takeover_keeps_a_lock_retaken_meanwhile() {
+    let h = home();
+    fs::create_dir(h.primary()).unwrap();
+    // Fresh again (a peer removed the dead one and took it) by the time this waiter is inside the takeover dir.
+    assert!(!remove_if_still_stale(&h.primary(), CREDENTIALS_STALE, &fast()));
+    assert!(h.primary().exists());
+    assert!(!with_suffix(&h.primary(), TAKEOVER_SUFFIX).exists());
+}

@@ -28,6 +28,9 @@ pub const RELEASE_TRIES: u32 = 5;
 const RELEASE_GAP: Duration = Duration::from_millis(100);
 /// mkdir answers access denied while the lock path does not exist: after this many such answers it is a real permission error.
 const ABSENT_DENIALS: u32 = 3;
+/// claude-swap's takeover directory beside a lock (`<lock>.takeover`) and the age at which its holder counts as dead.
+pub const TAKEOVER_SUFFIX: &str = ".takeover";
+pub const TAKEOVER_STALE: Duration = Duration::from_secs(5);
 
 type SleepFn = Arc<dyn Fn(Duration) + Send + Sync>;
 type RemoveFn = Arc<dyn Fn(&Path) -> io::Result<()> + Send + Sync>;
@@ -156,6 +159,44 @@ impl Drop for DirLock {
     }
 }
 
+fn is_stale(mtime: SystemTime, stale: Duration) -> bool {
+    SystemTime::now().duration_since(mtime).unwrap_or_default() > stale
+}
+
+fn with_suffix(p: &Path, suffix: &str) -> PathBuf {
+    let mut s = p.as_os_str().to_owned();
+    s.push(suffix);
+    PathBuf::from(s)
+}
+
+/// Removes a stale lock under `<lock>.takeover`, the sibling directory claude-swap (0.28+, #485) serializes takeovers
+/// through, and re-checks staleness inside it. Without it two waiters that saw the same dead holder could both run the
+/// stat + rmdir: the second rmdir then removes the fresh lock the first one has just taken, and both hold it. Claude Code
+/// never looks at the takeover directory. Returns true when this call removed the lock.
+fn remove_if_still_stale(path: &Path, stale: Duration, options: &LockOptions) -> bool {
+    let takeover = with_suffix(path, TAKEOVER_SUFFIX);
+    match fs::create_dir(&takeover) {
+        Ok(()) => {}
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+            // Held for one stat + rmdir; older than TAKEOVER_STALE its holder died mid-takeover.
+            if let Ok(meta) = fs::symlink_metadata(&takeover) {
+                if meta.modified().is_ok_and(|t| is_stale(t, TAKEOVER_STALE)) {
+                    let _ = if meta.is_dir() { fs::remove_dir(&takeover) } else { fs::remove_file(&takeover) };
+                }
+            }
+            return false;
+        }
+        Err(_) => return false,
+    }
+    // Re-check inside: the waiter before us may already have removed the dead lock and taken a fresh one at this path.
+    let removed = match fs::metadata(path).and_then(|m| m.modified()) {
+        Ok(mtime) => is_stale(mtime, stale) && (options.remove_dir)(path).is_ok(),
+        Err(_) => false,
+    };
+    let _ = fs::remove_dir(&takeover);
+    removed
+}
+
 /// Takes one directory lock (never creating its parent). A lock older than `stale` is a dead holder's: removed and retaken.
 pub fn acquire_dir_lock(path: &Path, stale: Duration, options: &LockOptions) -> Result<DirLock, LockError> {
     let start = Instant::now();
@@ -202,9 +243,10 @@ pub fn acquire_dir_lock(path: &Path, stale: Duration, options: &LockOptions) -> 
             }
             Err(e) => return Err(e.into()),
         };
-        if SystemTime::now().duration_since(mtime).unwrap_or_default() > stale {
-            // A dead holder (the protocol's rule): remove and retake; losing the race to another waiter just loops again.
-            if (options.remove_dir)(path).is_err() {
+        if is_stale(mtime, stale) {
+            // A dead holder (the protocol's rule): remove and retake. Declining (another waiter is mid-takeover or has
+            // retaken it, or the corpse could not be removed) backs off and loops again.
+            if !remove_if_still_stale(path, stale, options) {
                 (options.sleep)(Duration::from_millis(50));
             }
             continue;
@@ -239,15 +281,10 @@ pub struct ClaudeLockPaths {
 pub fn claude_lock_paths(credentials: &Path, claude_json: &Path) -> ClaudeLockPaths {
     let config_dir = credentials.parent().unwrap_or(Path::new("."));
     let real = dunce::canonicalize(config_dir).unwrap_or_else(|_| config_dir.to_path_buf());
-    let with_suffix = |p: &Path| {
-        let mut s = p.as_os_str().to_owned();
-        s.push(".lock");
-        PathBuf::from(s)
-    };
     ClaudeLockPaths {
         primary: config_dir.join(".oauth_refresh.lock"),
-        legacy: with_suffix(&real),
-        config: with_suffix(claude_json),
+        legacy: with_suffix(&real, ".lock"),
+        config: with_suffix(claude_json, ".lock"),
     }
 }
 
