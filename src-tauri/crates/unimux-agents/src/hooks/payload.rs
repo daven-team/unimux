@@ -369,6 +369,19 @@ impl Mapped {
     }
 }
 
+/// What Claude Code (2.1.328+) says when it cancels an armed automatic continue because the signed-in account changed or
+/// ended ("Automatic continue stopped · your login changed or ended · ...", also "Workflow paused · your login changed ...").
+const LOGIN_CHANGED: &str = "your login changed or ended";
+
+/// A `quota_auto_resume_disabled` Notification whose message says the login changed: the session waits for a human prompt,
+/// which resumes it on the current login. The other cancellations of that type (turned off, horizon exceeded) are not this.
+fn login_changed(body: &str) -> bool {
+    match js_parse(body) {
+        Some(Value::Object(m)) => m.get("message").and_then(Value::as_str).is_some_and(|t| t.contains(LOGIN_CHANGED)),
+        _ => false,
+    }
+}
+
 /// What a Notification hook means for the status (None: nothing). Unknown types stay a question for the user.
 pub fn notification_event(body: &str) -> Option<Mapped> {
     let kind = match notification_type(body) {
@@ -376,6 +389,10 @@ pub fn notification_event(body: &str) -> Option<Mapped> {
         Ok(Some(Value::String(t))) => t,
         Ok(_) => return Some(Mapped::new("notify", None)),
     };
+    // 1.2.6: the renderer may send `continue` itself (shared/loginResume.ts); otherwise the cell needs the user.
+    if kind == "quota_auto_resume_disabled" && login_changed(body) {
+        return Some(Mapped::new("notify", Some(json!({ "need": "input", "loginChanged": true }))));
+    }
     if IGNORED_NOTIFICATIONS.contains(&kind.as_str()) {
         return None;
     }
@@ -672,6 +689,29 @@ mod tests {
         assert!(is_cell_id("abc_1-x"));
         assert!(!is_cell_id("a b"));
         assert!(!is_cell_id(&"a".repeat(65)));
+    }
+
+    #[test]
+    fn a_login_change_that_stopped_the_automatic_continue_is_marked() {
+        let notify = |message: &str| {
+            notification_event(&json!({ "notification_type": "quota_auto_resume_disabled", "message": message }).to_string())
+        };
+        let marked = Some(Mapped::new("notify", Some(json!({ "need": "input", "loginChanged": true }))));
+        assert_eq!(notify("Automatic continue stopped \u{b7} your login changed or ended \u{b7} send a prompt to continue"), marked);
+        assert_eq!(
+            notify("Workflow paused \u{b7} your login changed or ended \u{b7} a prompt continues it on the current login \u{b7} /workflows to stop it"),
+            marked
+        );
+        // Other cancellations of the same type stay ignored.
+        assert_eq!(notify("Automatic continue was turned off"), None);
+        assert_eq!(notify("Automatic continue stopped \u{b7} horizon exceeded"), None);
+        assert_eq!(notification_event(r#"{"notification_type":"quota_auto_resume_disabled"}"#), None);
+        assert_eq!(notification_event(r#"{"notification_type":"quota_auto_resume_disabled","message":7}"#), None);
+        // The same text under another type changes nothing.
+        assert_eq!(
+            notification_event(r#"{"notification_type":"quota_auto_resume_fired","message":"your login changed or ended"}"#),
+            Some(Mapped::new("prompt", None))
+        );
     }
 
     #[test]

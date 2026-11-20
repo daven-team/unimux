@@ -212,6 +212,8 @@ export interface Settings {
   alerts: AlertSettings;
   /** 1.1.2: switching the main Claude (and optionally Codex) account automatically at a limit (see shared/autoSwitch). */
   accountSwitch: AutoSwitchSettings;
+  /** 1.2.6: send `continue` to a Claude session whose automatic continue stopped after a login change (shared/loginResume.ts); only `false` turns it off. */
+  resumeAfterLoginChange?: boolean;
   /** Which grids start in the background after launch (see shared/backgroundLoad.ts). */
   backgroundLoad: BackgroundLoadMode;
   /** Keyboard shortcuts the user changed: action id to combo (`Ctrl+Shift+E`), or null when the shortcut is switched off (see shared/shortcuts.ts). */

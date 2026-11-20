@@ -10,6 +10,7 @@ import { initQuitGuard } from './closeGuard';
 import { initDetachFollow } from './detach';
 import { initPromptQueue } from './promptQueue';
 import { initAgentPrompt } from './agentPrompt';
+import { handleCellHook } from './loginResume';
 import { initWaitTracking, revealCell } from './waiting';
 import { initTurnTracking } from './turnTimer';
 import { initOpenFromOs } from './openFromOs';
@@ -183,7 +184,7 @@ async function bootRest(mcpInfo: Awaited<ReturnType<typeof window.mc.getMcpInfo>
   // Files opened from Explorer / Finder ("Open with unimux"): the ones that waited for this window, then every later one.
   bootStep(initOpenFromOs);
   window.mc.on('cell:restarted', (cellId) => { terminals.prepareSpawn(cellId); terminals.syncSize(cellId); });
-  window.mc.on('cell:hook', (cellId, event, info) => terminals.hook(cellId, event, info));
+  window.mc.on('cell:hook', (cellId, event, info) => handleCellHook(cellId, event, info));
   window.mc.on('cell:session', (cellId, session) => {
     update((s) => updateCell(s, cellId, { session }));
     // A different conversation: its title may not be indexed yet.

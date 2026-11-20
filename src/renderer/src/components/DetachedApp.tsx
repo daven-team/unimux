@@ -25,6 +25,7 @@ import { useShortcuts, shortcutText, titleWithShortcut } from '../shortcuts';
 import { initSsh, sshHostMenuItems } from '../ssh';
 import { initPromptQueue } from '../promptQueue';
 import { initAgentPrompt } from '../agentPrompt';
+import { handleCellHook } from '../loginResume';
 import { useSshStore } from '../sshStore';
 import { getS, setStateOverlay, setUi, toast, useStore } from '../store';
 import { terminals } from '../terminals/TerminalManager';
@@ -118,7 +119,7 @@ async function boot(): Promise<void> {
   initAgentPrompt();
   window.mc.on('mcp:info', (info) => setUi({ mcpInfo: info }));
   window.mc.on('cell:restarted', (cellId) => { terminals.prepareSpawn(cellId); terminals.syncSize(cellId); });
-  window.mc.on('cell:hook', (cellId, event, info) => terminals.hook(cellId, event, info));
+  window.mc.on('cell:hook', (cellId, event, info) => handleCellHook(cellId, event, info));
   window.mc.on('cell:session', (cellId, session) => useStore.getState().update((s) => updateCell(s, cellId, { session })));
   window.mc.on('cell:spawnError', (cellId, message) => setUi((ui) => ({ cellErrors: { ...ui.cellErrors, [cellId]: message } })));
   // 1.0.9: Zezwól / Odrzuć from a permission notification; a stale one (the cell changed since) only shows the cell.
