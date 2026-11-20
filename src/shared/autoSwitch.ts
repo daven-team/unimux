@@ -16,6 +16,12 @@
  * nobody is below the thresholds, it escapes to the account with the most room (at least 3 points, never an expired, dead,
  * used-up or recently left one), switched or offered like any limit switch. An account without a 5-hour window (Ultra) is
  * judged on its weekly window alone. Rust (unimux-accounts auto_switch.rs) runs the same rules.
+ *
+ * 1.2.6: a main account that cannot work (`deadMain`: a lapsed subscription, or a usage 403 whose latest read came at least
+ * 30 minutes after the last good one, so the read after the 403 hold was refused again) is left like one at its limit: the
+ * normal choice (strategy, a chosen account wins), else any saved account with room. Its offer is told once in 3 hours; it
+ * gets no "left" mark (a dead copy is never a candidate, and once it reads fine again it may be returned to). An expired or
+ * signed-out login is the sign-in flow, not this one.
  */
 import { isThresholdPercent, type LimitWindowAlert } from './alerts';
 import type { MessageKey, MessageParams } from './i18n';
@@ -136,6 +142,10 @@ const LANDING_ROOM = 10;
 const ESCAPE_MIN_ROOM = 3;
 /** How long a return offer is not repeated (it has no limit period of its own). */
 const RETURN_OFFER_S = 5 * 3600;
+/** A usage 403 of the main account counts as dead once its latest read came this long after the last good one. */
+export const FORBIDDEN_DEAD_MS = 30 * 60_000;
+/** How long the offer about a dead main account is not repeated. */
+const DEAD_NOTICE_S = 3 * 3600;
 
 /** Who an account is for the settings and the memory: its e-mail, else its card id (never a token). */
 export const accountKey = (usage: Pick<ProviderUsage, 'email' | 'accountId'>): string => (usage.email || usage.accountId).toLowerCase();
@@ -182,6 +192,20 @@ export function switchTrigger(main: ProviderUsage, settings: AutoSwitchSettings,
     if (!found || percent > found.percent) found = { window: window.id, percent: Math.round(percent), resetsAt: window.resetsAt };
   }
   return found;
+}
+
+/** 1.2.6: why the main account cannot work. */
+export type DeadCause = 'lapsed' | 'forbidden';
+
+/**
+ * The main account's latest read says it cannot work: a lapsed subscription at once, a 403 once it persists (the latest
+ * refused read at least FORBIDDEN_DEAD_MS after the last good numbers; without earlier numbers never). An expired or
+ * signed-out login never counts.
+ */
+export function deadMain(main: ProviderUsage): DeadCause | undefined {
+  if (main.status === 'lapsed') return 'lapsed';
+  if (main.status === 'forbidden' && main.attemptAt !== undefined && main.attemptAt - main.fetchedAt >= FORBIDDEN_DEAD_MS) return 'forbidden';
+  return undefined;
 }
 
 const blockedByLeft = (memory: AutoSwitchMemory, provider: UsageProvider, key: string, nowMs: number): boolean =>
@@ -252,13 +276,14 @@ const atLimit = (main: ProviderUsage, nowMs: number): boolean =>
  * 1.2.6 (cswap #473): when the main account has hit a limit and nobody is below the thresholds, the accounts over them
  * with at least ESCAPE_MIN_ROOM points of room, most room first (whatever the strategy). Never an unusable copy, never one
  * left because of a limit before it reset (unless `memory` is absent: the user's own choice); a chosen account stays the
- * only one looked at.
+ * only one looked at. A dead main account (`deadMain`) escapes the same way with any room at all.
  */
 export function escapeCandidates(providers: ProviderUsage[], provider: UsageProvider, settings: AutoSwitchSettings, memory: AutoSwitchMemory | undefined, nowMs: number): ProviderUsage[] {
   const main = mainCard(providers, provider);
-  if (!main || !atLimit(main, nowMs)) return [];
+  if (!main || (!atLimit(main, nowMs) && !deadMain(main))) return [];
   const mainKey = accountKey(main);
-  const need = Math.max(0, roomOf(main, nowMs)) + ESCAPE_MIN_ROOM;
+  // usableCopy already keeps out a used-up window, so every copy left has some room.
+  const need = deadMain(main) ? 0 : Math.max(0, roomOf(main, nowMs)) + ESCAPE_MIN_ROOM;
   const out = providers.filter((usage) => {
     if (!usableCopy(usage, provider, nowMs, CANDIDATE_MAX_AGE_MS) || roomOf(usage, nowMs) < need) return false;
     const key = accountKey(usage);
@@ -290,10 +315,12 @@ export function nextAvailable(providers: ProviderUsage[], provider: UsageProvide
 }
 
 export type AutoSwitchSkip = 'off' | 'noMain' | 'below' | 'cooldown' | 'offered' | 'noCandidate';
+/** `escape` (1.2.6): the at-limit escape; `dead` (1.2.6): the main account cannot work (`deadMain`, no trigger). */
+export type AutoSwitchReason = 'limit' | 'return' | 'escape' | 'dead';
 export type AutoSwitchPlan =
   | { kind: 'none'; reason: AutoSwitchSkip; from?: ProviderUsage; trigger?: Trigger }
   /** `reason: 'return'`: back to the primary account (no trigger: the main account may be fine). */
-  | { kind: 'switch' | 'offer'; reason: 'limit' | 'return'; from: ProviderUsage; trigger?: Trigger; candidates: ProviderUsage[] }
+  | { kind: 'switch' | 'offer'; reason: AutoSwitchReason; from: ProviderUsage; trigger?: Trigger; candidates: ProviderUsage[]; dead?: DeadCause }
   /** No account has room: told once per limit period of the main account, with the earliest account to become usable. */
   | { kind: 'exhausted'; from: ProviderUsage; trigger: Trigger; next?: { email?: string; resetsAt: number }; target?: string };
 
@@ -301,7 +328,11 @@ const told = (memory: AutoSwitchMemory, provider: UsageProvider, key: string, wi
   memory.offered.some((mark) => mark.provider === provider && mark.key === key && mark.window === window && Math.abs(mark.resetsAt - resetsAt) <= SAME_PERIOD_S);
 
 /** Marks of the told notices (`offered`): an offer, a return offer and "all over the threshold" have their own keys. */
-export const offerKey = (kind: 'limit' | 'return' | 'exhausted', key: string): string => (kind === 'limit' ? key : `${kind}:${key}`);
+export const offerKey = (kind: 'limit' | 'return' | 'exhausted' | 'dead', key: string): string => (kind === 'limit' ? key : `${kind}:${key}`);
+
+/** The offer about this dead main account was told and its mark (`deadOfferMark`) has not run out. */
+const toldDead = (memory: AutoSwitchMemory, provider: UsageProvider, key: string, nowMs: number) =>
+  memory.offered.some((mark) => mark.provider === provider && mark.key === offerKey('dead', key) && mark.resetsAt * 1000 > nowMs);
 
 /**
  * What to do about `provider` after a new state of the accounts: nothing (and why), switch at once to the first of
@@ -328,15 +359,25 @@ export function planAutoSwitch(input: { providers: ProviderUsage[]; provider: Us
       return { kind: mode, reason: 'return', from, candidates: [home] };
     }
   }
+  const dead = deadMain(from);
   const trigger = switchTrigger(from, settings, nowMs);
+  if (!trigger && !dead) return { kind: 'none', reason: 'below', from };
+  if (cooling) return { kind: 'none', reason: 'cooldown', from, ...(trigger ? { trigger } : {}) };
+  if (dead) {
+    // 1.2.6: a dead main account is left like one at its limit: the normal choice, else any account with room.
+    if (mode === 'offer' && toldDead(memory, provider, key, nowMs)) return { kind: 'none', reason: 'offered', from };
+    const usable = chosen(candidates, settings, provider);
+    const picked = usable.length ? usable : escapeCandidates(providers, provider, settings, memory, nowMs);
+    if (!picked.length) return { kind: 'none', reason: 'noCandidate', from };
+    return { kind: mode, reason: 'dead', from, candidates: picked, dead };
+  }
   if (!trigger) return { kind: 'none', reason: 'below', from };
-  if (cooling) return { kind: 'none', reason: 'cooldown', from, trigger };
   if (mode === 'offer' && told(memory, provider, offerKey('limit', key), trigger.window, trigger.resetsAt)) return { kind: 'none', reason: 'offered', from, trigger };
   const usable = chosen(candidates, settings, provider);
   if (!usable.length) {
     // At its limit with nobody below the thresholds: the account with the most room takes over (switched or offered).
     const escape = escapeCandidates(providers, provider, settings, memory, nowMs);
-    if (escape.length) return { kind: mode, reason: 'limit', from, trigger, candidates: escape };
+    if (escape.length) return { kind: mode, reason: 'escape', from, trigger, candidates: escape };
     // "All accounts are over the threshold" only when that is known: some other saved account exists and none of them is
     // still waiting for its numbers (a card not read yet, a failed read) - those are looked at again with the next state.
     const others = providers.filter((usage) => usage.provider === provider && usage.managed && !usage.active && cardState(usage) !== 'expired' && usage.status !== 'lapsed' && (!settings.target[provider] || accountKey(usage) === settings.target[provider]));
@@ -383,6 +424,9 @@ export function rememberTold(memory: AutoSwitchMemory, provider: UsageProvider, 
 /** The told mark of a return offer (it has no limit period: it is not repeated for a few hours). */
 export const returnOfferMark = (nowMs: number): { window: '5h'; resetsAt: number } => ({ window: '5h', resetsAt: Math.floor(nowMs / 1000) + RETURN_OFFER_S });
 
+/** The told mark of an offer about a dead main account (no limit period: not repeated for a few hours). */
+export const deadOfferMark = (nowMs: number): { window: '5h'; resetsAt: number } => ({ window: '5h', resetsAt: Math.floor(nowMs / 1000) + DEAD_NOTICE_S });
+
 function prune(memory: AutoSwitchMemory, nowMs: number): AutoSwitchMemory {
   const ahead = <T extends { resetsAt: number }>(marks: T[]) => marks.filter((mark) => mark.resetsAt * 1000 > nowMs).slice(-MAX_MARKS);
   return { last: memory.last, left: ahead(memory.left), offered: ahead(memory.offered), away: memory.away };
@@ -409,17 +453,22 @@ export function normalizeAutoSwitchMemory(value: unknown): AutoSwitchMemory {
 /** An offer the limits panel shows until it is taken, dismissed or no longer true (renderer and main share it). */
 export interface SwitchOffer {
   provider: UsageProvider;
-  /** `return`: back to the primary account after its reset (no window, no percent). */
-  reason: 'limit' | 'return';
+  /** `return`: back to the primary account after its reset (no window, no percent); `escape` / `dead`: see AutoSwitchReason. */
+  reason: AutoSwitchReason;
+  /** `dead`: the subscription lapsed (else the usage endpoint refuses access). */
+  lapsed?: boolean;
   /** Card id of the proposed account (`claude:<record>` / `codex:<record>`). */
   to: string;
   toEmail?: string;
   fromEmail?: string;
   window?: UsageWindow['id'];
   percent?: number;
+  /** `escape`: the proposed account's room (0-100, rounded). */
+  room?: number;
 }
 
-export type SwitchNoticeKind = 'switched' | 'returned' | 'offer' | 'returnOffer' | 'exhausted' | 'failed';
+/** `escaped` / `escapeOffer` and `deadSwitched` / `deadOffer` (1.2.6): the at-limit escape and leaving a dead main account. */
+export type SwitchNoticeKind = 'switched' | 'returned' | 'offer' | 'returnOffer' | 'exhausted' | 'failed' | 'escaped' | 'escapeOffer' | 'deadSwitched' | 'deadOffer';
 export interface SwitchNotice {
   kind: SwitchNoticeKind;
   provider: UsageProvider;
@@ -431,6 +480,10 @@ export interface SwitchNotice {
   resetsAt?: number;
   /** `exhausted` with a chosen target account (only that account was looked at). */
   targetOnly?: boolean;
+  /** `escaped` / `escapeOffer`: the room of the account switched to. */
+  room?: number;
+  /** `deadSwitched` / `deadOffer`: why the main account cannot work. */
+  dead?: DeadCause;
 }
 
 type Translate = (key: MessageKey, params?: MessageParams) => string;
@@ -463,7 +516,20 @@ export function autoSwitchText(event: SwitchNotice, tr: Translate, language = 'p
       return { title, body: when ? tr('Wszystkie konta przekroczyły próg, najbliższy reset: {to} o {time}', { to, time: when }) : tr('Wszystkie konta przekroczyły próg. Konto główne zostaje bez zmian.') };
     }
     case 'failed': return { title, body: tr('Nie udało się przełączyć na {to}. Konto główne zostało bez zmian.', { to }) };
+    case 'escaped': return { title, body: tr('Wszystkie konta są ponad progiem - przełączono na {to}: największy zapas ({room}%).', { to, room: event.room ?? 0 }) };
+    case 'escapeOffer': return { title, body: tr('Wszystkie konta są ponad progiem - największy zapas ma {to} ({room}%). Przełączyć na {to}?', { to, room: event.room ?? 0 }) };
+    case 'deadSwitched': return { title, body: event.dead === 'lapsed' ? tr('Konto {from} nie działa (subskrypcja wygasła) - przełączono na {to}.', { from, to }) : tr('Konto {from} nie działa (odmowa dostępu) - przełączono na {to}.', { from, to }) };
+    case 'deadOffer': return { title, body: event.dead === 'lapsed' ? tr('Konto {from} nie działa (subskrypcja wygasła). Przełączyć na {to}?', { from, to }) : tr('Konto {from} nie działa (odmowa dostępu). Przełączyć na {to}?', { from, to }) };
   }
+}
+
+/** What the limits panel says about a pending offer (the same text as its notification). */
+export function switchOfferText(offer: SwitchOffer, tr: Translate): string {
+  const kind: SwitchNoticeKind = offer.reason === 'return' ? 'returnOffer' : offer.reason === 'escape' ? 'escapeOffer' : offer.reason === 'dead' ? 'deadOffer' : 'offer';
+  return autoSwitchText({
+    kind, provider: offer.provider, fromEmail: offer.fromEmail, toEmail: offer.toEmail, window: offer.window, percent: offer.percent, room: offer.room,
+    ...(offer.reason === 'dead' ? { dead: offer.lapsed ? 'lapsed' as const : 'forbidden' as const } : {}),
+  }, tr).body;
 }
 
 /** The subtle state line of the limits panel: "Switcher: wł. · wraca na A" / "Switcher: wył.". */

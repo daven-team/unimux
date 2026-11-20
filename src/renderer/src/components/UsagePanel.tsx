@@ -14,7 +14,7 @@ import { ProviderIcon } from './ProviderIcons';
 import { BusyRing, RefreshIcon, useHoldBusy } from './Spinner';
 import { SwitcherPopover } from './SwitcherPopover';
 import { setAutoSwitch, switcherSummary, UsageResizeHandle, useUsageHeight } from './UsageAutoSwitch';
-import { enableAutoSwitch } from '../../../shared/autoSwitch';
+import { enableAutoSwitch, switchOfferText } from '../../../shared/autoSwitch';
 
 const DORMANT_NOTE = 'Token dostępu wygasł - Claude Code odświeży go przy najbliższym użyciu. Uruchom sesję Claude (albo wyślij wiadomość), a limity wrócą.';
 const HELD_NOTE = {
@@ -594,12 +594,7 @@ export function UsagePanel() {
           )}
           {switchOffer && (
             <div className="usage-warning usage-switch-offer" role="status">
-              <p className="usage-note">{switchOffer.reason === 'return'
-                ? tr('Konto podstawowe {to} znowu ma zapas.', { to: switchOffer.toEmail ?? NAMES[switchOffer.provider] })
-                : tr('Limit {window} konta {from} wykorzystany w {percent}%. Konto {to} ma zapas.', {
-                  window: switchOffer.window === '7d' ? tr('7 dni') : '5 h', percent: switchOffer.percent ?? 0,
-                  from: switchOffer.fromEmail ?? NAMES[switchOffer.provider], to: switchOffer.toEmail ?? NAMES[switchOffer.provider],
-                })}</p>
+              <p className="usage-note">{switchOfferText(switchOffer, tr)}</p>
               <div className="usage-empty-buttons">
                 <button className="btn small primary" disabled={swapping !== null} onClick={() => void acceptOffer()}>{tr('Przełącz na {to}', { to: switchOffer.toEmail ?? NAMES[switchOffer.provider] })}</button>
                 <button className="btn small ghost" onClick={() => void window.mc.dismissSwitchOffer().catch(() => undefined)}>{tr('Ukryj')}</button>
