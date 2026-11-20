@@ -354,6 +354,7 @@ mod tests {
         fs::set_permissions(&legacy, ro.clone()).unwrap();
         fs::remove_file(&global).unwrap();
         assert_eq!(pick(), global); // empty and read-only
+        #[allow(clippy::permissions_set_readonly_false)] // a temp file of this test, made writable again to rewrite it
         ro.set_readonly(false);
         fs::set_permissions(&legacy, ro).unwrap();
         fs::write(&legacy, r#"{"oauthAccount":{}}"#).unwrap();

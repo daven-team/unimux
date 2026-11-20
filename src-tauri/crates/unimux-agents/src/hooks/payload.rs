@@ -697,9 +697,14 @@ mod tests {
             notification_event(&json!({ "notification_type": "quota_auto_resume_disabled", "message": message }).to_string())
         };
         let marked = Some(Mapped::new("notify", Some(json!({ "need": "input", "loginChanged": true }))));
-        assert_eq!(notify("Automatic continue stopped \u{b7} your login changed or ended \u{b7} send a prompt to continue"), marked);
         assert_eq!(
-            notify("Workflow paused \u{b7} your login changed or ended \u{b7} a prompt continues it on the current login \u{b7} /workflows to stop it"),
+            notify("Automatic continue stopped \u{b7} your login changed or ended \u{b7} send a prompt to continue"),
+            marked
+        );
+        assert_eq!(
+            notify(
+                "Workflow paused \u{b7} your login changed or ended \u{b7} a prompt continues it on the current login \u{b7} /workflows to stop it"
+            ),
             marked
         );
         // Other cancellations of the same type stay ignored.

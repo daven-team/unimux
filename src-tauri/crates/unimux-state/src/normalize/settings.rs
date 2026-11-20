@@ -355,7 +355,7 @@ mod tests {
         let out = normalize_auto_switch(Some(&json!({ "strategy": "weekly-first" })));
         assert_eq!(out["strategy"], json!("weekly-first"));
         // After every other key, so the rest of the object keeps its order.
-        assert_eq!(out.as_object().unwrap().keys().last().map(String::as_str), Some("strategy"));
+        assert_eq!(out.as_object().unwrap().keys().next_back().map(String::as_str), Some("strategy"));
         assert!(default_auto_switch().get("strategy").is_none());
     }
 }

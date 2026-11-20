@@ -179,10 +179,10 @@ fn remove_if_still_stale(path: &Path, stale: Duration, options: &LockOptions) ->
         Ok(()) => {}
         Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
             // Held for one stat + rmdir; older than TAKEOVER_STALE its holder died mid-takeover.
-            if let Ok(meta) = fs::symlink_metadata(&takeover) {
-                if meta.modified().is_ok_and(|t| is_stale(t, TAKEOVER_STALE)) {
-                    let _ = if meta.is_dir() { fs::remove_dir(&takeover) } else { fs::remove_file(&takeover) };
-                }
+            if let Ok(meta) = fs::symlink_metadata(&takeover)
+                && meta.modified().is_ok_and(|t| is_stale(t, TAKEOVER_STALE))
+            {
+                let _ = if meta.is_dir() { fs::remove_dir(&takeover) } else { fs::remove_file(&takeover) };
             }
             return false;
         }
