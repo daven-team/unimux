@@ -174,11 +174,11 @@ impl CredentialSource {
     }
 }
 
-/// `readClaudeIdentity`: who a Claude login belongs to, from the `.claude.json` next to it.
+/// `readClaudeIdentity`: who a Claude login belongs to, from the global config next to it (`.claude.json`, or the legacy `.config.json` where Claude Code uses it).
 pub fn read_claude_identity(source: &CredentialSource) -> AccountIdentity {
     let path = match source.env_trimmed("CLAUDE_CONFIG_DIR") {
-        Some(dir) => Path::new(&dir).join(".claude.json"),
-        None => source.home.join(".claude.json"),
+        Some(dir) => crate::swapfs::global_config_path(Path::new(&dir), Path::new(&dir)),
+        None => crate::swapfs::global_config_path(&source.home.join(".claude"), &source.home),
     };
     let Some(raw) = source.read(&path) else { return AccountIdentity::default() };
     match unimux_core::js_json::parse(&raw) {
