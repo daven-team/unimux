@@ -9,12 +9,21 @@
  * switched-out copy, never twice within the cooldown and never back to an account left because of a limit before that
  * limit reset. With a primary account ("konto podstawowe") and "return after the reset" on, the app goes back to it once it
  * was left automatically and is usable again. When no account has room it stays and says so once per limit period.
+ *
+ * 1.2.6 (after cswap 0.29-0.30): the strategy "weekly-first" picks, among the usable accounts, the one whose 7-day window
+ * resets soonest (a landing with 10 points under every threshold first, more room on a tie), so weekly quota that would
+ * expire unused is spent first; a chosen account still wins. When the main account has hit a limit (100% in a window) and
+ * nobody is below the thresholds, it escapes to the account with the most room (at least 3 points, never an expired, dead,
+ * used-up or recently left one), switched or offered like any limit switch. An account without a 5-hour window (Ultra) is
+ * judged on its weekly window alone. Rust (unimux-accounts auto_switch.rs) runs the same rules.
  */
 import { isThresholdPercent, type LimitWindowAlert } from './alerts';
 import type { MessageKey, MessageParams } from './i18n';
 import { cardState, effectivePercent, type ProviderUsage, type UsageProvider, type UsageWindow } from './usage';
 
 export type AutoSwitchMode = 'ask' | 'switch';
+/** `room`: the most room (default, never written); `weekly-first`: the soonest weekly reset first. */
+export type AutoSwitchStrategy = 'room' | 'weekly-first';
 
 export interface AutoSwitchSettings {
   /** "Przełączaj konto Claude automatycznie" (off by default). */
@@ -33,7 +42,11 @@ export interface AutoSwitchSettings {
   primary: Partial<Record<UsageProvider, string>>;
   /** Go back to the primary account once its limit reset ("Wracaj na konto podstawowe po resecie"). */
   returnHome: boolean;
+  /** 1.2.6: absent means `room`, so states from before it stay byte for byte the same. */
+  strategy?: 'weekly-first';
 }
+
+export const strategyOf = (settings: Pick<AutoSwitchSettings, 'strategy'>): AutoSwitchStrategy => (settings.strategy === 'weekly-first' ? 'weekly-first' : 'room');
 
 export const AUTO_SWITCH_COOLDOWNS: readonly number[] = [5, 15, 30, 60];
 
@@ -71,6 +84,7 @@ export function normalizeAutoSwitch(value: unknown): AutoSwitchSettings {
     target: perProvider(r.target),
     primary: perProvider(r.primary),
     returnHome: typeof r.returnHome === 'boolean' ? r.returnHome : d.returnHome,
+    ...(r.strategy === 'weekly-first' ? { strategy: 'weekly-first' as const } : {}),
   };
 }
 
@@ -116,6 +130,10 @@ export const CANDIDATE_MAX_AGE_MS = 20 * 60_000;
 /** Two candidates with room within this many percent are equal; the earlier reset decides. */
 const ROOM_TIE = 1;
 const MAX_MARKS = 50;
+/** `weekly-first`: points under every threshold a landing wants (cswap's hysteresis margin); less sorts after. */
+const LANDING_ROOM = 10;
+/** The at-limit escape: points of room an account over its thresholds needs (cswap's SPENT_HEADROOM_PCT). */
+const ESCAPE_MIN_ROOM = 3;
 /** How long a return offer is not repeated (it has no limit period of its own). */
 const RETURN_OFFER_S = 5 * 3600;
 
@@ -138,6 +156,12 @@ export function roomOf(usage: ProviderUsage, nowMs: number): number {
 /** The earliest reset still ahead (epoch s), Infinity when none. */
 function nextResetOf(usage: ProviderUsage, nowMs: number): number {
   const ahead = usage.windows.map((window) => window.resetsAt).filter((at) => at > 0 && at * 1000 > nowMs);
+  return ahead.length ? Math.min(...ahead) : Number.POSITIVE_INFINITY;
+}
+
+/** The reset of the 7-day window still ahead (epoch s), Infinity when unknown. */
+function weeklyResetOf(usage: ProviderUsage, nowMs: number): number {
+  const ahead = usage.windows.filter((window) => window.id === '7d' && window.resetsAt > 0 && window.resetsAt * 1000 > nowMs).map((window) => window.resetsAt);
   return ahead.length ? Math.min(...ahead) : Number.POSITIVE_INFINITY;
 }
 
@@ -193,14 +217,54 @@ export function rankCandidates(providers: ProviderUsage[], provider: UsageProvid
     if (!options.ignoreLeft && blockedByLeft(memory, provider, key, nowMs)) return false;
     return belowThresholds(usage, settings, nowMs);
   });
-  return usable.sort((a, b) => {
-    const room = roomOf(b, nowMs) - roomOf(a, nowMs);
-    if (Math.abs(room) >= ROOM_TIE) return room;
-    const resetA = nextResetOf(a, nowMs);
-    const resetB = nextResetOf(b, nowMs);
-    if (resetA !== resetB) return resetA < resetB ? -1 : 1;
-    return room !== 0 ? room : accountKey(a).localeCompare(accountKey(b));
+  return usable.sort(strategyOf(settings) === 'weekly-first' ? (a, b) => weeklyFirst(a, b, settings, nowMs) : (a, b) => mostRoomFirst(a, b, nowMs));
+}
+
+function mostRoomFirst(a: ProviderUsage, b: ProviderUsage, nowMs: number): number {
+  const room = roomOf(b, nowMs) - roomOf(a, nowMs);
+  if (Math.abs(room) >= ROOM_TIE) return room;
+  const resetA = nextResetOf(a, nowMs);
+  const resetB = nextResetOf(b, nowMs);
+  if (resetA !== resetB) return resetA < resetB ? -1 : 1;
+  return room !== 0 ? room : accountKey(a).localeCompare(accountKey(b));
+}
+
+/** Points left before the nearest threshold, each window against its own line (one without a line against 100%). */
+const lineRoom = (usage: ProviderUsage, settings: AutoSwitchSettings, nowMs: number): number =>
+  usage.windows.length ? Math.min(...usage.windows.map((window) => { const t = thresholdOf(settings, window.id); return (t.enabled ? t.percent : 100) - effectivePercent(window, nowMs); })) : 0;
+
+/** `weekly-first`: a landing with LANDING_ROOM first, then the soonest weekly reset (within SAME_PERIOD_S: equal), then room. */
+function weeklyFirst(a: ProviderUsage, b: ProviderUsage, settings: AutoSwitchSettings, nowMs: number): number {
+  const tightA = lineRoom(a, settings, nowMs) < LANDING_ROOM;
+  const tightB = lineRoom(b, settings, nowMs) < LANDING_ROOM;
+  if (tightA !== tightB) return tightA ? 1 : -1;
+  const weekA = weeklyResetOf(a, nowMs);
+  const weekB = weeklyResetOf(b, nowMs);
+  if (weekA !== weekB && !(Number.isFinite(weekA) && Number.isFinite(weekB) && Math.abs(weekA - weekB) <= SAME_PERIOD_S)) return weekA < weekB ? -1 : 1;
+  return mostRoomFirst(a, b, nowMs);
+}
+
+/** The main account has hit a limit: a window whose reset is ahead is used up. */
+const atLimit = (main: ProviderUsage, nowMs: number): boolean =>
+  current(main) && main.windows.some((window) => window.resetsAt * 1000 > nowMs && effectivePercent(window, nowMs) >= 100);
+
+/**
+ * 1.2.6 (cswap #473): when the main account has hit a limit and nobody is below the thresholds, the accounts over them
+ * with at least ESCAPE_MIN_ROOM points of room, most room first (whatever the strategy). Never an unusable copy, never one
+ * left because of a limit before it reset (unless `memory` is absent: the user's own choice); a chosen account stays the
+ * only one looked at.
+ */
+export function escapeCandidates(providers: ProviderUsage[], provider: UsageProvider, settings: AutoSwitchSettings, memory: AutoSwitchMemory | undefined, nowMs: number): ProviderUsage[] {
+  const main = mainCard(providers, provider);
+  if (!main || !atLimit(main, nowMs)) return [];
+  const mainKey = accountKey(main);
+  const need = Math.max(0, roomOf(main, nowMs)) + ESCAPE_MIN_ROOM;
+  const out = providers.filter((usage) => {
+    if (!usableCopy(usage, provider, nowMs, CANDIDATE_MAX_AGE_MS) || roomOf(usage, nowMs) < need) return false;
+    const key = accountKey(usage);
+    return key !== mainKey && !(memory && blockedByLeft(memory, provider, key, nowMs));
   });
+  return chosen(out.sort((a, b) => mostRoomFirst(a, b, nowMs)), settings, provider);
 }
 
 /** The chosen account only, when the settings name one for the provider; every candidate otherwise. */
@@ -270,6 +334,9 @@ export function planAutoSwitch(input: { providers: ProviderUsage[]; provider: Us
   if (mode === 'offer' && told(memory, provider, offerKey('limit', key), trigger.window, trigger.resetsAt)) return { kind: 'none', reason: 'offered', from, trigger };
   const usable = chosen(candidates, settings, provider);
   if (!usable.length) {
+    // At its limit with nobody below the thresholds: the account with the most room takes over (switched or offered).
+    const escape = escapeCandidates(providers, provider, settings, memory, nowMs);
+    if (escape.length) return { kind: mode, reason: 'limit', from, trigger, candidates: escape };
     // "All accounts are over the threshold" only when that is known: some other saved account exists and none of them is
     // still waiting for its numbers (a card not read yet, a failed read) - those are looked at again with the next state.
     const others = providers.filter((usage) => usage.provider === provider && usage.managed && !usage.active && cardState(usage) !== 'expired' && (!settings.target[provider] || accountKey(usage) === settings.target[provider]));
@@ -404,7 +471,7 @@ export function autoSwitchStatus(settings: AutoSwitchSettings, provider: UsagePr
   if (!autoSwitchOn(settings, provider)) return tr('Switcher: wył.');
   const parts = [tr('Switcher: wł.')];
   const target = settings.target[provider];
-  parts.push(target ? tr('na {account}', { account: target }) : tr('największy zapas'));
+  parts.push(target ? tr('na {account}', { account: target }) : strategyOf(settings) === 'weekly-first' ? tr('najbliższy reset tygodniowy') : tr('największy zapas'));
   const primary = settings.primary[provider];
   if (primary && settings.returnHome) parts.push(memory?.away[provider] === primary ? tr('wraca na {account}', { account: primary }) : tr('podstawowe: {account}', { account: primary }));
   return parts.join(' · ');

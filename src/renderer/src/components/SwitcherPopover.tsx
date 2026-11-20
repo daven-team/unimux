@@ -4,7 +4,7 @@
 // panel when it fits there, otherwise to the right of the panel, and scrolls inside when the window is short.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { accountKey, enableAutoSwitch, type AutoSwitchSettings } from '../../../shared/autoSwitch';
+import { accountKey, enableAutoSwitch, strategyOf, type AutoSwitchSettings } from '../../../shared/autoSwitch';
 import { effectivePercent, type ProviderUsage, type UsageProvider } from '../../../shared/usage';
 import { useI18n } from '../i18n';
 import { PercentSlider } from './PercentSlider';
@@ -138,7 +138,7 @@ export function SwitcherPopover({ anchor, panel, settings, providers, onClose }:
       </div>;
     };
     return <div key={provider} className="switcher-pop-accounts">
-      {select('target', tr('Przełączaj na'), tr('Największy zapas'))}
+      {select('target', tr('Przełączaj na'), strategyOf(settings) === 'weekly-first' ? tr('Najbliższy reset tygodniowy') : tr('Największy zapas'))}
       {select('primary', tr('Konto podstawowe'), tr('Brak'))}
     </div>;
   };

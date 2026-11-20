@@ -30,6 +30,17 @@ pub enum Mode {
 
 pub const AUTO_SWITCH_COOLDOWNS: [u32; 4] = [5, 15, 30, 60];
 
+/// `AutoSwitchStrategy` (1.2.6): which usable account a limit switch picks when no account is chosen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Strategy {
+    /// The most room, the earlier reset on a tie (the only choice until 1.2.6; not written to the settings).
+    #[default]
+    MostRoom,
+    /// The account whose 7-day window resets soonest, so weekly quota that would expire unused is spent first (cswap's
+    /// `weekly-first`); the most room breaks a tie.
+    WeeklyFirst,
+}
+
 /// `AutoSwitchSettings`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AutoSwitchSettings {
@@ -44,6 +55,7 @@ pub struct AutoSwitchSettings {
     /// Per provider: the primary account the app returns to.
     pub primary: BTreeMap<Provider, String>,
     pub return_home: bool,
+    pub strategy: Strategy,
 }
 
 impl Default for AutoSwitchSettings {
@@ -59,6 +71,7 @@ impl Default for AutoSwitchSettings {
             target: BTreeMap::new(),
             primary: BTreeMap::new(),
             return_home: true,
+            strategy: Strategy::MostRoom,
         }
     }
 }
@@ -101,6 +114,10 @@ impl AutoSwitchSettings {
             target: per_provider(get("target")),
             primary: per_provider(get("primary")),
             return_home: get("returnHome").and_then(Value::as_bool).unwrap_or(d.return_home),
+            strategy: match get("strategy").and_then(Value::as_str) {
+                Some("weekly-first") => Strategy::WeeklyFirst,
+                _ => d.strategy,
+            },
         }
     }
 
@@ -175,6 +192,12 @@ pub const CANDIDATE_MAX_AGE_MS: f64 = 20.0 * 60_000.0;
 /// Two candidates with room within this many percent are equal; the earlier reset decides.
 const ROOM_TIE: f64 = 1.0;
 const MAX_MARKS: usize = 50;
+/// `weekly-first`: points of room under every threshold a landing wants (cswap's hysteresis margin); an account with less
+/// would cross its line within the cooldown the switch starts, so it comes after the ones that have it.
+const LANDING_ROOM: f64 = 10.0;
+/// The at-limit escape: points of room (on its fullest window) an account over its thresholds needs to be worth the move
+/// (cswap's SPENT_HEADROOM_PCT: a smaller edge is a few minutes of work).
+const ESCAPE_MIN_ROOM: f64 = 3.0;
 /// How long a return offer is not repeated.
 const RETURN_OFFER_S: f64 = 5.0 * 3600.0;
 
@@ -191,6 +214,17 @@ pub fn main_card(providers: &[ProviderUsage], provider: Provider) -> Option<&Pro
 /// `roomOf`: unused part of the tightest window (0-100); an account without numbers has none.
 pub fn room_of(usage: &ProviderUsage, now_ms: f64) -> f64 {
     usage.windows.iter().map(|w| 100.0 - effective_percent(w, now_ms)).reduce(f64::min).unwrap_or(0.0)
+}
+
+/// The reset of the 7-day window still ahead (epoch s), infinity when there is none (an unknown reset sorts last).
+fn weekly_reset_of(usage: &ProviderUsage, now_ms: f64) -> f64 {
+    usage
+        .windows
+        .iter()
+        .filter(|w| w.id == WindowId::SevenDay && w.resets_at > 0.0 && w.resets_at * 1000.0 > now_ms)
+        .map(|w| w.resets_at)
+        .reduce(f64::min)
+        .unwrap_or(f64::INFINITY)
 }
 
 fn next_reset_of(usage: &ProviderUsage, now_ms: f64) -> f64 {
@@ -267,6 +301,55 @@ fn below_thresholds(usage: &ProviderUsage, settings: &AutoSwitchSettings, now_ms
     })
 }
 
+/// Points left before the nearest threshold, each window against its own line (a window without one against 100%).
+fn line_room(usage: &ProviderUsage, settings: &AutoSwitchSettings, now_ms: f64) -> f64 {
+    usage
+        .windows
+        .iter()
+        .map(|w| {
+            let t = settings.threshold(w.id);
+            (if t.enabled { f64::from(t.percent) } else { 100.0 }) - effective_percent(w, now_ms)
+        })
+        .reduce(f64::min)
+        .unwrap_or(0.0)
+}
+
+/// The most room first; room within `ROOM_TIE` goes to the earlier reset, then the key.
+fn most_room_first(a: &ProviderUsage, b: &ProviderUsage, now_ms: f64) -> f64 {
+    let room = room_of(b, now_ms) - room_of(a, now_ms);
+    if room.abs() >= ROOM_TIE {
+        return room;
+    }
+    let (ra, rb) = (next_reset_of(a, now_ms), next_reset_of(b, now_ms));
+    if ra != rb {
+        return if ra < rb { -1.0 } else { 1.0 };
+    }
+    if room != 0.0 {
+        return room;
+    }
+    match account_key(a).cmp(&account_key(b)) {
+        std::cmp::Ordering::Less => -1.0,
+        std::cmp::Ordering::Equal => 0.0,
+        std::cmp::Ordering::Greater => 1.0,
+    }
+}
+
+/// `weekly-first`: a landing with `LANDING_ROOM` first, then the 7-day window that resets soonest (resets within
+/// `SAME_PERIOD_S` are the same), then `most_room_first`.
+fn weekly_first(a: &ProviderUsage, b: &ProviderUsage, settings: &AutoSwitchSettings, now_ms: f64) -> f64 {
+    let tight = |u: &ProviderUsage| line_room(u, settings, now_ms) < LANDING_ROOM;
+    match (tight(a), tight(b)) {
+        (false, true) => return -1.0,
+        (true, false) => return 1.0,
+        _ => {}
+    }
+    let (wa, wb) = (weekly_reset_of(a, now_ms), weekly_reset_of(b, now_ms));
+    if wa != wb && !(wa.is_finite() && wb.is_finite() && (wa - wb).abs() <= SAME_PERIOD_S) {
+        return if wa < wb { -1.0 } else { 1.0 };
+    }
+    most_room_first(a, b, now_ms)
+}
+
 /// `Array.prototype.sort` for short arrays as V8 does it (stable binary insertion), so a comparator that is not a strict
 /// total order (the room tie) orders exactly like 1.1.4.
 fn js_sort<T>(items: &mut Vec<T>, cmp: impl Fn(&T, &T) -> f64) {
@@ -309,25 +392,46 @@ pub fn rank_candidates(
         })
         .cloned()
         .collect();
-    js_sort(&mut usable, |a, b| {
-        let room = room_of(b, now_ms) - room_of(a, now_ms);
-        if room.abs() >= ROOM_TIE {
-            return room;
-        }
-        let (ra, rb) = (next_reset_of(a, now_ms), next_reset_of(b, now_ms));
-        if ra != rb {
-            return if ra < rb { -1.0 } else { 1.0 };
-        }
-        if room != 0.0 {
-            return room;
-        }
-        match account_key(a).cmp(&account_key(b)) {
-            std::cmp::Ordering::Less => -1.0,
-            std::cmp::Ordering::Equal => 0.0,
-            std::cmp::Ordering::Greater => 1.0,
-        }
+    js_sort(&mut usable, |a, b| match settings.strategy {
+        Strategy::MostRoom => most_room_first(a, b, now_ms),
+        Strategy::WeeklyFirst => weekly_first(a, b, settings, now_ms),
     });
     usable
+}
+
+/// The main account has hit a limit: a window whose reset is ahead is used up.
+fn at_limit(main: &ProviderUsage, now_ms: f64) -> bool {
+    current(main) && main.windows.iter().any(|w| w.resets_at * 1000.0 > now_ms && effective_percent(w, now_ms) >= 100.0)
+}
+
+/// 1.2.6 (cswap #473): the at-limit escape. When the main account has hit a limit and no saved account is below the
+/// thresholds, the accounts over them that still have `ESCAPE_MIN_ROOM` points of room on their fullest window (more than
+/// the main account), most room first, whatever the strategy. Never an expired, dead, unread or used-up copy (`usable_copy`),
+/// never one left because of a limit before it reset (unless `memory` is `None`: the user's own choice); a chosen account
+/// stays the only one looked at. Empty when the main account is not at a limit.
+pub fn escape_candidates(
+    providers: &[ProviderUsage],
+    provider: Provider,
+    settings: &AutoSwitchSettings,
+    memory: Option<&AutoSwitchMemory>,
+    now_ms: f64,
+) -> Vec<ProviderUsage> {
+    let Some(main) = main_card(providers, provider).filter(|m| at_limit(m, now_ms)) else { return Vec::new() };
+    let main_key = account_key(main);
+    let need = room_of(main, now_ms).max(0.0) + ESCAPE_MIN_ROOM;
+    let mut out: Vec<ProviderUsage> = providers
+        .iter()
+        .filter(|u| {
+            if !usable_copy(u, provider, now_ms, CANDIDATE_MAX_AGE_MS) || room_of(u, now_ms) < need {
+                return false;
+            }
+            let key = account_key(u);
+            key != main_key && !memory.is_some_and(|m| blocked_by_left(m, provider, &key, now_ms))
+        })
+        .cloned()
+        .collect();
+    js_sort(&mut out, |a, b| most_room_first(a, b, now_ms));
+    chosen(out, settings, provider)
 }
 
 fn chosen(candidates: Vec<ProviderUsage>, settings: &AutoSwitchSettings, provider: Provider) -> Vec<ProviderUsage> {
@@ -474,6 +578,12 @@ pub fn plan_auto_switch(
     }
     let usable = chosen(candidates, settings, provider);
     if usable.is_empty() {
+        // The main account is at its limit and nobody is below the thresholds: staying means no work at all, so the account
+        // with the most room left takes over (switched or offered like any limit switch).
+        let escape = escape_candidates(providers, provider, settings, Some(memory), now_ms);
+        if !escape.is_empty() {
+            return Plan::Act { switch, reason: Reason::Limit, from: from.clone(), trigger: Some(trigger), candidates: escape };
+        }
         // "All accounts are over the threshold" only when that is known: some other saved account exists and none of them
         // is still waiting for its numbers.
         let target = settings.target.get(&provider);
@@ -929,7 +1039,12 @@ impl AutoSwitcher {
         };
         // Thresholds hold in every mode: an offer whose account went over one meanwhile is withdrawn.
         let key = account_key(&target);
-        if manual_candidates(&providers, offer.provider, &(self.o.settings)(), self.now(), Some(&key)).is_empty() {
+        let settings = (self.o.settings)();
+        let now = self.now();
+        // An at-limit escape's account is over a threshold by definition: it stays acceptable while the escape holds.
+        if manual_candidates(&providers, offer.provider, &settings, now, Some(&key)).is_empty()
+            && !escape_candidates(&providers, offer.provider, &settings, None, now).iter().any(|u| account_key(u) == key)
+        {
             self.set_offer(None);
             return SwapResult::fail_named(SwapError::NoTarget, target.email.clone());
         }
