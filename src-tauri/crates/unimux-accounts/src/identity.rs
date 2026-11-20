@@ -241,11 +241,12 @@ pub fn fill_missing_identity(record: &AccountIdentity, found: &AccountIdentity) 
     patch
 }
 
-/// `<CLAUDE_CONFIG_DIR>/.claude.json` when the variable is set (trimmed, non-empty), else `<home>/.claude.json`.
+/// `<CLAUDE_CONFIG_DIR>/.claude.json` when the variable is set (trimmed, non-empty), else `<home>/.claude.json`; the legacy
+/// `.config.json` in the config home instead when Claude Code would use it ([`crate::swapfs::pick_global_config`]).
 pub fn claude_json_path(config_dir: Option<&str>, home: &Path) -> PathBuf {
     match config_dir.map(js::trim).filter(|d| !d.is_empty()) {
-        Some(dir) => Path::new(dir).join(".claude.json"),
-        None => home.join(".claude.json"),
+        Some(dir) => crate::swapfs::global_config_path(Path::new(dir), Path::new(dir)),
+        None => crate::swapfs::global_config_path(&home.join(".claude"), home),
     }
 }
 

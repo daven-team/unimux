@@ -242,10 +242,30 @@ pub fn swap_paths(home: &Path, env: &BTreeMap<String, String>) -> Option<SwapPat
     Some(match custom {
         Some(c) => {
             let dir = PathBuf::from(c);
-            SwapPaths { credentials: dir.join(".credentials.json"), claude_json: dir.join(".claude.json") }
+            SwapPaths { credentials: dir.join(".credentials.json"), claude_json: global_config_path(&dir, &dir) }
         }
-        None => SwapPaths { credentials: home.join(".claude").join(".credentials.json"), claude_json: home.join(".claude.json") },
+        None => {
+            let config_home = home.join(".claude");
+            SwapPaths { credentials: config_home.join(".credentials.json"), claude_json: global_config_path(&config_home, home) }
+        }
     })
+}
+
+/// Claude Code's global config: `<config home>/.config.json` (the legacy name) when Claude Code would use it, else
+/// `<base>/.claude.json`. `config_home` is CLAUDE_CONFIG_DIR or `~/.claude`, `base` CLAUDE_CONFIG_DIR or the home folder.
+pub fn global_config_path(config_home: &Path, base: &Path) -> PathBuf {
+    pick_global_config(&config_home.join(".config.json"), &base.join(".claude.json"))
+}
+
+/// Claude Code 2.1.299's choice (the rule claude-swap 0.27.1 mirrors): the legacy `.config.json` wins only when it is a
+/// regular file (symlinks followed) that is non-empty, or empty but writable with no `.claude.json` beside it. Anything else
+/// (missing, unreadable, a directory, an empty file Claude Code's sandbox left behind) leaves `.claude.json`.
+pub fn pick_global_config(legacy: &Path, global: &Path) -> PathBuf {
+    let Ok(meta) = fs::metadata(legacy) else { return global.to_path_buf() };
+    if meta.is_file() && (meta.len() > 0 || (!meta.permissions().readonly() && !global.exists())) {
+        return legacy.to_path_buf();
+    }
+    global.to_path_buf()
 }
 
 /// Node's `path.isAbsolute`: on Windows a leading slash or backslash counts too (a rooted path), as does `C:\`.
@@ -312,6 +332,44 @@ mod tests {
         let custom = BTreeMap::from([("CLAUDE_CONFIG_DIR".to_string(), format!(" {abs} "))]);
         let p = swap_paths(home, &custom).unwrap();
         assert_eq!(p.claude_json, Path::new(abs).join(".claude.json"));
+    }
+
+    /// Claude Code 2.1.299's rule for the legacy `~/.claude/.config.json` (claude-swap 0.27.1 #463).
+    #[test]
+    fn the_legacy_config_json_wins_only_where_claude_code_uses_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        let config_home = home.join(".claude");
+        fs::create_dir(&config_home).unwrap();
+        let (legacy, global) = (config_home.join(".config.json"), home.join(".claude.json"));
+        let none = BTreeMap::new();
+        let pick = || swap_paths(home, &none).unwrap().claude_json;
+        assert_eq!(pick(), global); // no legacy file
+        fs::write(&legacy, "").unwrap();
+        assert_eq!(pick(), legacy); // empty and writable, nothing beside it
+        fs::write(&global, "{}").unwrap();
+        assert_eq!(pick(), global); // empty, with .claude.json beside it (the sandbox leftover)
+        let mut ro = fs::metadata(&legacy).unwrap().permissions();
+        ro.set_readonly(true);
+        fs::set_permissions(&legacy, ro.clone()).unwrap();
+        fs::remove_file(&global).unwrap();
+        assert_eq!(pick(), global); // empty and read-only
+        ro.set_readonly(false);
+        fs::set_permissions(&legacy, ro).unwrap();
+        fs::write(&legacy, r#"{"oauthAccount":{}}"#).unwrap();
+        fs::write(&global, "{}").unwrap();
+        assert_eq!(pick(), legacy); // non-empty: wins even over an existing .claude.json
+        assert_eq!(crate::identity::claude_json_path(None, home), legacy);
+        fs::remove_file(&legacy).unwrap();
+        fs::create_dir(&legacy).unwrap();
+        assert_eq!(pick(), global); // not a regular file
+        // CLAUDE_CONFIG_DIR: both names in that folder.
+        let custom = home.join("custom");
+        fs::create_dir(&custom).unwrap();
+        fs::write(custom.join(".config.json"), "{}").unwrap();
+        let env = BTreeMap::from([("CLAUDE_CONFIG_DIR".to_string(), custom.to_string_lossy().into_owned())]);
+        assert_eq!(swap_paths(home, &env).unwrap().claude_json, custom.join(".config.json"));
+        assert_eq!(crate::identity::claude_json_path(custom.to_str(), home), custom.join(".config.json"));
     }
 
     #[test]
