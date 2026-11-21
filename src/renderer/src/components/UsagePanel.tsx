@@ -22,7 +22,7 @@ const HELD_NOTE = {
   'switched-out': 'Przełączone poza aplikacją (cswap lub /login), więc aplikacja nie odnawia tej kopii.',
 } as const;
 const DORMANT_SHORT = 'Limity wrócą po następnej wiadomości w Claude.';
-const FORBIDDEN_NOTE = 'Odmowa dostępu (HTTP 403), np. wstrzymana subskrypcja. Logowanie jest ważne - ponowne logowanie nie pomoże.';
+const FORBIDDEN_NOTE = 'Odmowa dostępu (HTTP 403), np. wygasła lub wstrzymana subskrypcja. Zaloguj się ponownie; jeśli to nie pomoże, usuń konto w menu karty.';
 const FORBIDDEN_SHORT = 'Odmowa dostępu (HTTP 403)';
 const LAPSED_NOTE = 'Subskrypcja tego konta wygasła, więc nie ma limitów do pokazania. Aplikacja sprawdza ją co kilka godzin - po odnowieniu limity wrócą same. Możesz też usunąć konto.';
 const CSWAP_NOTE = 'Kopię tego logowania ma też cswap, więc aplikacja jej nie odnawia.';
@@ -157,6 +157,8 @@ function AccountCard({ usage, now, language, showMain, savedIndex, swapping, onM
   const expired = state === 'expired';
   // 1.2.6: a lapsed subscription: no bars, one line and "Remove account" right on the card.
   const lapsed = state === 'lapsed';
+  // 1.2.7: access denied (403) looks like an expired sign-in: one line, "Sign in again", and "Remove account" in the menu.
+  const denied = state === 'denied';
   const dormant = usage.status === 'dormant';
   // 1.2.6: the stored Claude login ends within a week (or ended and the card does not say so yet).
   const loginEnd = lapsed ? undefined : loginEndNotice(usage, now);
@@ -231,6 +233,13 @@ function AccountCard({ usage, now, language, showMain, savedIndex, swapping, onM
         <button className="btn small primary" onClick={() => openAuth(usage.provider, reloginTarget(usage))}>{tr('Zaloguj ponownie')}</button>
       </div>
     );
+  } else if (denied) {
+    body = (
+      <div className="usage-expired" title={tr(FORBIDDEN_NOTE)}>
+        <span className="usage-note">{tr(FORBIDDEN_SHORT)}</span>
+        <button className="btn small primary" onClick={() => openAuth(usage.provider, reloginTarget(usage))}>{tr('Zaloguj ponownie')}</button>
+      </div>
+    );
   } else if (lapsed) {
     // The remove action of the account menu, on the card itself: a saved account goes, a main login's card leaves the panel.
     const remove = usage.managed ? () => void removeAccount() : onRemoveCard ? () => void removeCard() : undefined;
@@ -244,28 +253,27 @@ function AccountCard({ usage, now, language, showMain, savedIndex, swapping, onM
     body = <p className="usage-note">{tr('Codex: logowanie kluczem API, brak limitów.')}</p>;
   } else if (state === 'unavailable') {
     const codexDormant = dormant && usage.provider === 'codex';
-    const text = usage.status === 'forbidden' ? tr(FORBIDDEN_SHORT) : codexDormant ? tr(CODEX_DORMANT) : dormant ? tr(DORMANT_SHORT) : failureText;
-    const title = usage.status === 'forbidden' ? tr(FORBIDDEN_NOTE) : codexDormant ? tr(CODEX_DORMANT) : dormant ? tr(DORMANT_NOTE) : reasonTitle;
+    const text = codexDormant ? tr(CODEX_DORMANT) : dormant ? tr(DORMANT_SHORT) : failureText;
+    const title = codexDormant ? tr(CODEX_DORMANT) : dormant ? tr(DORMANT_NOTE) : reasonTitle;
     body = <p className={`usage-note ${calm || dormant ? '' : 'warn'}`} title={title}>{text}</p>;
   } else {
     // `ok` and `stale`: the numbers, then at most one short line (why they are old). 1.1.0: whose copy this is (cswap, an
     // outside switch) is only a tooltip: a card with valid limits looks like every other one.
     const ageNote = usage.source === 'log' ? tr('stan z ostatniej sesji, sprzed {age}', { age }) : state === 'stale' ? tr('dane sprzed {age}', { age }) : '';
     const failed = usage.status === 'error';
-    const line = usage.status === 'forbidden' ? tr(FORBIDDEN_SHORT)
-      : failed ? (ageNote ? `${failureText} (${ageNote})` : failureText)
+    const line = failed ? (ageNote ? `${failureText} (${ageNote})` : failureText)
       : ageNote;
-    const title = usage.status === 'forbidden' ? tr(FORBIDDEN_NOTE) : failed ? reasonTitle : dormant ? tr(DORMANT_NOTE) : heldTitle;
+    const title = failed ? reasonTitle : dormant ? tr(DORMANT_NOTE) : heldTitle;
     body = (
       <>
         {!line && heldTitle ? <div className="usage-windows-held" title={heldTitle}>{windows}</div> : windows}
-        {line && <p className={`usage-note ${(failed && !calm) || usage.status === 'forbidden' ? 'warn' : ''}`} title={title}>{line}</p>}
+        {line && <p className={`usage-note ${failed && !calm ? 'warn' : ''}`} title={title}>{line}</p>}
       </>
     );
   }
 
   return (
-    <div className={`usage-card ${expired || lapsed ? 'expired' : ''} ${dormant && !expired ? 'dormant' : ''} ${state === 'stale' && usage.status === 'error' ? 'stale' : ''} ${swapping === usage.accountId ? 'busy' : ''}`} title={usage.org || undefined} aria-busy={swapping === usage.accountId || undefined}>
+    <div className={`usage-card ${expired || lapsed || denied ? 'expired' : ''} ${dormant && !expired ? 'dormant' : ''} ${state === 'stale' && usage.status === 'error' ? 'stale' : ''} ${swapping === usage.accountId ? 'busy' : ''}`} title={usage.org || undefined} aria-busy={swapping === usage.accountId || undefined}>
       <div className="usage-card-head">
         <ProviderIcon provider={usage.provider} />
         <span className="usage-account" title={name}>{name}</span>
@@ -290,7 +298,7 @@ function AccountCard({ usage, now, language, showMain, savedIndex, swapping, onM
               ...(canRelogin ? [{ label: tr('Zaloguj ponownie to konto'), disabled: busy, onClick: () => openAuth(usage.provider, reloginTarget(usage)) }] : []),
               { label: tr('Skopiuj diagnostykę'), onClick: copyDiagnostics },
               ...(usage.managed ? [{ label: tr('Usuń konto'), danger: true, disabled: busy, onClick: () => void removeAccount() }]
-                : (expired || lapsed) && onRemoveCard ? [{ label: tr('Usuń konto'), danger: true, onClick: () => void removeCard() }] : []),
+                : (expired || lapsed || denied) && onRemoveCard ? [{ label: tr('Usuń konto'), danger: true, onClick: () => void removeCard() }] : []),
             ])}
           ><KebabIcon /></button>
         )}

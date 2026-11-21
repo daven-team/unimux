@@ -20,7 +20,6 @@ describe('a lapsed subscription (1.2.6)', () => {
     expect(cardState({ ...lapsed, windows: card().windows })).toBe('lapsed');
     expect(summaryAccounts([lapsed, card({ accountId: 'claude:r2' })]).map((u) => u.accountId)).toEqual(['claude:r2']);
     expect(makeMainOffered(lapsed)).toBe(false);
-    expect(cardState(card({ status: 'forbidden', windows: [] }))).toBe('unavailable');
   });
 
   it('lets the card of a lapsed main login leave the panel until it works again', () => {
@@ -29,6 +28,19 @@ describe('a lapsed subscription (1.2.6)', () => {
     expect(withoutRemovedCards([main], [key])).toEqual({ cards: [], removed: [key] });
     // Renewed: the card is back and the key is forgotten.
     expect(withoutRemovedCards([{ ...main, status: 'ok', windows: card().windows }], [key]).removed).toEqual([]);
+  });
+});
+
+describe('access denied (1.2.7)', () => {
+  const denied = card({ status: 'forbidden', source: 'cache', error: 'http-403', loginExpiresAt: NOW + DAY });
+
+  it('looks like an expired sign-in: no numbers (old ones included), no login-end line, removable from the panel', () => {
+    expect(cardState(denied)).toBe('denied');
+    expect(cardState({ ...denied, windows: [] })).toBe('denied');
+    expect(summaryAccounts([denied, card({ accountId: 'claude:r2' })]).map((u) => u.accountId)).toEqual(['claude:r2']);
+    expect(loginEndNotice(denied, NOW)).toBeUndefined();
+    const main = { ...denied, accountId: 'claude:main', managed: undefined };
+    expect(withoutRemovedCards([main], [removedCardKey(main)]).cards).toEqual([]);
   });
 });
 
