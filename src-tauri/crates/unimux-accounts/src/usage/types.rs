@@ -221,6 +221,11 @@ pub struct ProviderUsage {
     pub held_by: Option<HeldBy>,
     /// 1.2.6: epoch ms when the stored Claude login's refresh token expires (`refreshTokenExpiresAt`), when the file says.
     pub login_expires_at: Option<f64>,
+    /// 1.2.7: the subscription state the OAuth profile reported after a 403 (`past_due`, `canceled`, ...), for the card and
+    /// the diagnostics.
+    pub subscription: Option<String>,
+    /// 1.2.7: the claude.ai page that pays an overdue invoice of an unpaid subscription.
+    pub payment_url: Option<String>,
 }
 
 impl ProviderUsage {
@@ -243,6 +248,8 @@ impl ProviderUsage {
             active: false,
             held_by: None,
             login_expires_at: None,
+            subscription: None,
+            payment_url: None,
         }
     }
 
@@ -272,6 +279,12 @@ impl ProviderUsage {
         }
         if let Some(l) = self.login_expires_at {
             m.insert("loginExpiresAt".into(), js::num(l));
+        }
+        if let Some(s) = &self.subscription {
+            m.insert("subscription".into(), s.clone().into());
+        }
+        if let Some(u) = &self.payment_url {
+            m.insert("paymentUrl".into(), u.clone().into());
         }
         if let Some(managed) = self.managed {
             m.insert("managed".into(), managed.into());

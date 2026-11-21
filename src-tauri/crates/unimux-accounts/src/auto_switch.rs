@@ -294,6 +294,10 @@ pub enum Dead {
 pub fn dead_main(main: &ProviderUsage) -> Option<Dead> {
     match main.status {
         Status::Lapsed => Some(Dead::Lapsed),
+        // 1.2.7: an unpaid subscription is refused until it is paid: dead at once, like a lapsed one.
+        Status::Forbidden if main.subscription.as_deref().is_some_and(|s| matches!(s, "past_due" | "unpaid")) => {
+            Some(Dead::Forbidden)
+        }
         Status::Forbidden if main.attempt_at.is_some_and(|at| at - main.fetched_at >= FORBIDDEN_DEAD_MS) => Some(Dead::Forbidden),
         _ => None,
     }

@@ -36,6 +36,15 @@ fn a_lapsed_main_is_dead_at_once_a_forbidden_one_only_when_it_persists() {
     bare.windows.clear();
     bare.fetched_at = NOW - MIN;
     assert_eq!(dead_main(&bare), None);
+    // 1.2.7: an unpaid subscription (the profile said `past_due` / `unpaid`) is dead at once, numbers or not.
+    for sub in ["past_due", "unpaid"] {
+        let mut unpaid = bare.clone();
+        unpaid.subscription = Some(sub.into());
+        assert_eq!(dead_main(&unpaid), Some(Dead::Forbidden), "{sub}");
+    }
+    let mut active = bare.clone();
+    active.subscription = Some("active".into());
+    assert_eq!(dead_main(&active), None);
     // An expired or signed-out login and a failed read are other flows.
     for status in [Status::Expired, Status::SignedOut, Status::Error, Status::Elsewhere, Status::Dormant] {
         assert_eq!(dead_main(&dead("a@x.com", status, 60.0 * MIN)), None, "{status:?}");

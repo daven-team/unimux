@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LOGIN_END_WARN_MS, cardState, loginEndNotice, makeMainOffered, removedCardKey, summaryAccounts, usageDiagnostics, withoutRemovedCards, type ProviderUsage } from '../src/shared/usage';
+import { LOGIN_END_WARN_MS, cardState, unpaidSubscription, loginEndNotice, makeMainOffered, removedCardKey, summaryAccounts, usageDiagnostics, withoutRemovedCards, type ProviderUsage } from '../src/shared/usage';
 import { usageMessages } from '../src/shared/usageMessages';
 import { translate } from '../src/shared/i18n';
 
@@ -41,6 +41,17 @@ describe('access denied (1.2.7)', () => {
     expect(loginEndNotice(denied, NOW)).toBeUndefined();
     const main = { ...denied, accountId: 'claude:main', managed: undefined };
     expect(withoutRemovedCards([main], [removedCardKey(main)]).cards).toEqual([]);
+  });
+
+  it('tells an unpaid subscription apart and names the subscription in the diagnostics', () => {
+    expect(unpaidSubscription({ subscription: 'past_due' })).toBe(true);
+    expect(unpaidSubscription({ subscription: 'unpaid' })).toBe(true);
+    expect(unpaidSubscription({ subscription: 'active' })).toBe(false);
+    expect(unpaidSubscription({})).toBe(false);
+    const unpaid = { ...denied, subscription: 'past_due', paymentUrl: 'https://claude.ai/settings/billing/o' };
+    expect(cardState(unpaid)).toBe('denied');
+    expect(usageDiagnostics(unpaid, NOW, 'saved 1')).toContain('subscription: past_due');
+    expect(usageDiagnostics(unpaid, NOW, 'saved 1')).not.toContain('claude.ai/settings');
   });
 });
 

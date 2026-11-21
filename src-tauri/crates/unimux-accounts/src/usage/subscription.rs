@@ -19,6 +19,16 @@ pub struct Profile {
     pub billing_type: Option<String>,
     pub account_uuid: Option<String>,
     pub organization_uuid: Option<String>,
+    /// 1.2.7: the page that pays an overdue invoice (`payment_auth_hosted_invoice_url`), only a claude.ai address.
+    pub payment_url: Option<String>,
+}
+
+/// 1.2.7: the only address a payment link may open.
+pub const PAYMENT_URL_PREFIX: &str = "https://claude.ai/";
+
+/// A payment link the card may open: a claude.ai page without spaces or control characters, at most 300 characters.
+pub fn payment_url(raw: Option<String>) -> Option<String> {
+    raw.filter(|u| u.starts_with(PAYMENT_URL_PREFIX) && u.len() <= 300 && !u.chars().any(|c| c.is_whitespace() || c.is_control()))
 }
 
 fn text(o: &serde_json::Map<String, Value>, key: &str) -> Option<String> {
@@ -37,6 +47,7 @@ pub fn parse_profile(body: &Value) -> Option<Profile> {
         billing_type: text(org, "billing_type"),
         account_uuid: body.get("account").and_then(Value::as_object).and_then(|a| text(a, "uuid")),
         organization_uuid: text(org, "uuid"),
+        payment_url: payment_url(text(org, "payment_auth_hosted_invoice_url")),
     })
 }
 
@@ -54,6 +65,11 @@ impl Profile {
     pub fn lapsed(&self) -> bool {
         let org_plan = matches!(self.organization_type.as_deref(), Some("claude_pro" | "claude_team" | "claude_enterprise"));
         self.subscription_status.as_deref() == Some("canceled") && self.tier == FREE_TIER && !org_plan
+    }
+
+    /// 1.2.7: the subscription is not paid (`past_due`, `unpaid`): the plan stays, the limits are refused until it is paid.
+    pub fn unpaid(&self) -> bool {
+        matches!(self.subscription_status.as_deref(), Some("past_due" | "unpaid"))
     }
 
     /// The plan badge: the organisation type where it names the plan, else the server's plan name, else the tier's label,
@@ -117,6 +133,28 @@ mod tests {
         }
         assert!(parse_profile(&json!({ "organization": { "uuid": "o" } })).is_none());
         assert!(parse_profile(&json!([])).is_none());
+    }
+
+    #[test]
+    fn an_unpaid_subscription_keeps_its_plan_and_offers_only_a_claude_ai_payment_page() {
+        let mut b = body("past_due", "default_claude_max_5x", "claude_max");
+        b["organization"]["payment_auth_hosted_invoice_url"] =
+            json!("https://claude.ai/settings/billing/x?action=pay_overdue_invoice");
+        let p = parse_profile(&b).unwrap();
+        assert!(p.unpaid() && !p.lapsed());
+        assert_eq!(p.label(), "Max 5x");
+        assert_eq!(p.payment_url.as_deref(), Some("https://claude.ai/settings/billing/x?action=pay_overdue_invoice"));
+        assert!(parse_profile(&body("unpaid", "default_claude_max_5x", "claude_max")).unwrap().unpaid());
+        assert!(!parse_profile(&body("active", "default_claude_max_5x", "claude_max")).unwrap().unpaid());
+        for bad in [
+            "https://evil.example/pay",
+            "http://claude.ai/pay",
+            "https://claude.ai.evil.io/x",
+            "https://claude.ai/a b",
+            "javascript:alert(1)",
+        ] {
+            assert_eq!(payment_url(Some(bad.into())), None, "{bad}");
+        }
     }
 
     #[test]

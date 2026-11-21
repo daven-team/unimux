@@ -62,7 +62,14 @@ export interface ProviderUsage {
   heldBy?: 'live' | 'cswap' | 'switched-out';
   /** 1.2.6: epoch ms when the stored Claude login ends (`refreshTokenExpiresAt`); absent when the file does not say. */
   loginExpiresAt?: number;
+  /** 1.2.7: the subscription state the OAuth profile reported after a 403 (`past_due`, `canceled`, ...). */
+  subscription?: string;
+  /** 1.2.7: the claude.ai page that pays the overdue invoice of an unpaid subscription. */
+  paymentUrl?: string;
 }
+
+/** 1.2.7: the profile says the subscription is not paid (`past_due`, `unpaid`): refused until it is paid. */
+export const unpaidSubscription = (usage: Pick<ProviderUsage, 'subscription'>): boolean => usage.subscription === 'past_due' || usage.subscription === 'unpaid';
 
 const HELD_BY = { 'held-by-live': 'live', 'held-by-cswap': 'cswap', 'switched-out': 'switched-out' } as const;
 
@@ -261,6 +268,7 @@ export function usageDiagnostics(usage: ProviderUsage, nowMs: number, label: str
     `last attempt: ${age(usage.attemptAt)}`,
     `next attempt: ${usage.retryAt === undefined ? 'n/a' : usage.retryAt <= nowMs ? 'due' : `in ${formatDuration((usage.retryAt - nowMs) / 1000)}`}`,
     `windows: ${usage.windows.length ? usage.windows.map((w) => `${w.id} ${Math.round(w.usedPercent)}%`).join(', ') : 'none'}`,
+    `subscription: ${usage.subscription ?? 'n/a'}`,
     `login ends: ${usage.loginExpiresAt === undefined ? 'n/a' : usage.loginExpiresAt <= nowMs ? 'passed' : `in ${formatDuration((usage.loginExpiresAt - nowMs) / 1000)}`}`,
   ].join('\n');
 }

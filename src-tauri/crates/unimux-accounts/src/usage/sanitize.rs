@@ -50,6 +50,8 @@ pub fn sanitize_usage(raw: &Value) -> Option<ProviderUsage> {
         active: raw.get("active") == Some(&Value::Bool(true)),
         held_by: raw.get("heldBy").and_then(Value::as_str).and_then(HeldBy::parse),
         login_expires_at: stamp(raw.get("loginExpiresAt")),
+        subscription: text(raw.get("subscription"), 32),
+        payment_url: super::subscription::payment_url(text(raw.get("paymentUrl"), 300)),
     })
 }
 

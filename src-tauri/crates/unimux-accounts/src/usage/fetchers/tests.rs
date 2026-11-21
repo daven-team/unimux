@@ -215,6 +215,16 @@ async fn a_usage_403_asks_the_profile_whether_the_subscription_lapsed() {
     assert_eq!((u.status, u.plan.as_deref()), (Status::Forbidden, Some("Max 5x")));
     let (u, _) = run(profile("canceled", "default_claude_ai", "acc-1"), false).await;
     assert_eq!(u.status, Status::Forbidden);
+    assert_eq!((u.subscription.as_deref(), u.payment_url.as_deref()), (None, None), "an unproven answer stores nothing");
+    // 1.2.7: unpaid (`past_due`): still forbidden with its plan, the subscription state and the claude.ai payment page kept.
+    let mut unpaid: Value = serde_json::from_str(&profile("past_due", "default_claude_max_5x", "acc-1")).unwrap();
+    unpaid["organization"]["payment_auth_hosted_invoice_url"] =
+        json!("https://claude.ai/settings/billing/o?action=pay_overdue_invoice");
+    let (u, _) = run(unpaid.to_string(), true).await;
+    assert_eq!((u.status, u.plan.as_deref(), u.subscription.as_deref()), (Status::Forbidden, Some("Max 5x"), Some("past_due")));
+    assert_eq!(u.payment_url.as_deref(), Some("https://claude.ai/settings/billing/o?action=pay_overdue_invoice"));
+    let kept = crate::usage::sanitize::sanitize_usage(&u.to_value()).unwrap();
+    assert_eq!((kept.subscription, kept.payment_url), (u.subscription.clone(), u.payment_url.clone()));
     // A failed profile read keeps today's 403.
     let (u, _) = run("not json".into(), true).await;
     assert_eq!((u.status, u.error.as_deref()), (Status::Forbidden, Some("http-403")));

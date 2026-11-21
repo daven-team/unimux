@@ -25,7 +25,7 @@
  */
 import { isThresholdPercent, type LimitWindowAlert } from './alerts';
 import type { MessageKey, MessageParams } from './i18n';
-import { cardState, effectivePercent, type ProviderUsage, type UsageProvider, type UsageWindow } from './usage';
+import { cardState, effectivePercent, unpaidSubscription, type ProviderUsage, type UsageProvider, type UsageWindow } from './usage';
 
 export type AutoSwitchMode = 'ask' | 'switch';
 /** `room`: the most room (default, never written); `weekly-first`: the soonest weekly reset first. */
@@ -204,6 +204,8 @@ export type DeadCause = 'lapsed' | 'forbidden';
  */
 export function deadMain(main: ProviderUsage): DeadCause | undefined {
   if (main.status === 'lapsed') return 'lapsed';
+  // 1.2.7: an unpaid subscription is refused until it is paid: dead at once, like a lapsed one.
+  if (main.status === 'forbidden' && unpaidSubscription(main)) return 'forbidden';
   if (main.status === 'forbidden' && main.attemptAt !== undefined && main.attemptAt - main.fetchedAt >= FORBIDDEN_DEAD_MS) return 'forbidden';
   return undefined;
 }

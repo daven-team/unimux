@@ -244,6 +244,10 @@ pub async fn fetch_claude(deps: &FetcherDeps, r: &AccountRef) -> FetchResult {
             if let Some(profile) = read_profile(deps, &credentials.access_token).await
                 && profile.belongs_to(&owner)
             {
+                u.subscription = profile.subscription_status.clone();
+                if profile.unpaid() {
+                    u.payment_url = profile.payment_url.clone();
+                }
                 if profile.lapsed() {
                     u.status = Status::Lapsed;
                     u.error = Some("subscription-lapsed".into());

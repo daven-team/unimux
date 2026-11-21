@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { updateSettings } from '../../../shared/state';
 import type { AccountNotice, LoginTarget } from '../../../shared/accounts';
-import { adoptCopyOffered, cardState, claudeLoginActions, diagnosticLabel, effectivePercent, formatDuration, loginEndNotice, makeMainOffered, shortAccountName, shortDuration, summaryAccounts, usageBand, usageDiagnostics, usageErrorKind, usageSummary, withoutRemovedCards, removedCardKey, type ProviderUsage, type SetAsideAccount, type UsageProvider, type UsageWindow } from '../../../shared/usage';
+import { adoptCopyOffered, cardState, claudeLoginActions, diagnosticLabel, effectivePercent, formatDuration, loginEndNotice, makeMainOffered, unpaidSubscription, shortAccountName, shortDuration, summaryAccounts, usageBand, usageDiagnostics, usageErrorKind, usageSummary, withoutRemovedCards, removedCardKey, type ProviderUsage, type SetAsideAccount, type UsageProvider, type UsageWindow } from '../../../shared/usage';
 import { cswapNoteText, noticeText, setAsideText, usageErrorKey } from '../../../shared/usageMessages';
 import { useI18n } from '../i18n';
 import { swapErrorKey, swapErrorText } from '../../../shared/swapMessages';
@@ -24,6 +24,7 @@ const HELD_NOTE = {
 const DORMANT_SHORT = 'Limity wrócą po następnej wiadomości w Claude.';
 const FORBIDDEN_NOTE = 'Odmowa dostępu (HTTP 403), np. wygasła lub wstrzymana subskrypcja. Zaloguj się ponownie; jeśli to nie pomoże, usuń konto w menu karty.';
 const FORBIDDEN_SHORT = 'Odmowa dostępu (HTTP 403)';
+const UNPAID_NOTE = 'Subskrypcja tego konta jest nieopłacona, więc serwer odmawia limitów. Po opłaceniu faktury limity wrócą same (aplikacja sprawdza co pół godziny). Możesz też usunąć konto.';
 const LAPSED_NOTE = 'Subskrypcja tego konta wygasła, więc nie ma limitów do pokazania. Aplikacja sprawdza ją co kilka godzin - po odnowieniu limity wrócą same. Możesz też usunąć konto.';
 const CSWAP_NOTE = 'Kopię tego logowania ma też cswap, więc aplikacja jej nie odnawia.';
 const ADOPT_LABEL = 'Odświeżaj tę kopię w unimuxie';
@@ -231,6 +232,15 @@ function AccountCard({ usage, now, language, showMain, savedIndex, swapping, onM
       <div className="usage-expired" title={heldTitle ?? reasonTitle}>
         <span className="usage-note">{tr('Logowanie wygasło')}</span>
         <button className="btn small primary" onClick={() => openAuth(usage.provider, reloginTarget(usage))}>{tr('Zaloguj ponownie')}</button>
+      </div>
+    );
+  } else if (denied && unpaidSubscription(usage)) {
+    // 1.2.7: an unpaid subscription: signing in again would not help; the button opens claude.ai's page for the overdue invoice.
+    const pay = usage.paymentUrl;
+    body = (
+      <div className="usage-expired" title={tr(UNPAID_NOTE)}>
+        <span className="usage-note warn">{tr('Subskrypcja nieopłacona')}</span>
+        {pay && <button className="btn small primary" onClick={() => window.mc.openExternal(pay)}>{tr('Opłać')}</button>}
       </div>
     );
   } else if (denied) {

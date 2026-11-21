@@ -100,6 +100,9 @@ describe('automatic account switch: 1.2.6 a dead main account and the escape not
     expect(deadMain(dead('forbidden', 5 * MIN))).toBeUndefined();
     expect(deadMain(dead('forbidden', 30 * MIN))).toBe('forbidden');
     expect(deadMain({ ...dead('forbidden', 30 * MIN), attemptAt: undefined })).toBeUndefined();
+    // 1.2.7: an unpaid subscription is dead at once.
+    expect(deadMain({ ...dead('forbidden', 0), subscription: 'past_due' })).toBe('forbidden');
+    expect(deadMain({ ...dead('forbidden', 0), subscription: 'active' })).toBeUndefined();
     for (const status of ['expired', 'signedOut', 'error', 'elsewhere'] as const) expect(deadMain(dead(status, 60 * MIN))).toBeUndefined();
   });
 
