@@ -202,7 +202,7 @@ function AccountCard({ usage, now, language, showMain, savedIndex, swapping, onM
   const cswapNote = usage.heldBy === 'cswap' ? cswapNoteText(usage.status) : undefined;
 
   const copyDiagnostics = () => {
-    window.mc.clipboardWrite(usageDiagnostics(usage, Date.now(), diagnosticLabel(usage, savedIndex)));
+    window.mc.clipboardWrite(usageDiagnostics(usage, Date.now(), diagnosticLabel(usage, savedIndex), useStore.getState().s.settings.usageIntervalMinutes));
     toast(tr('Skopiowano diagnostykę.'));
   };
   const reasonTitle = usage.error ? tr('Przyczyna techniczna: {code}', { code: usage.error }) : undefined;

@@ -253,24 +253,49 @@ export function diagnosticLabel(usage: Pick<ProviderUsage, 'provider' | 'managed
 }
 
 /** Short text for bug reports: reason, status and ages only. Never contains tokens or e-mails; `label` names the account (see `diagnosticLabel`). */
-export function usageDiagnostics(usage: ProviderUsage, nowMs: number, label: string): string {
+export function usageDiagnostics(usage: ProviderUsage, nowMs: number, label: string, intervalMinutes?: number): string {
   const age = (at?: number) => (at === undefined ? 'n/a' : `${formatDuration((nowMs - at) / 1000)} ago`);
-  const status = usageHttpStatus(usage.error);
   return [
     `account: ${label}`,
     `provider: ${usage.provider}${usage.managed ? ' (saved account)' : ''}${usage.plan ? `, plan ${usage.plan}` : ''}`,
     `state: ${usage.status}`,
     `reason: ${usage.error ?? 'none'}`,
-    `http status: ${status ?? 'n/a'}`,
+    `http status: ${diagnosticHttpStatus(usage)}`,
     `active login: ${usage.active ? 'yes' : 'no'}`,
     `renewal: ${usage.heldBy ? `held (${usage.heldBy})` : 'allowed'}`,
     `data source: ${usage.source}, last good data ${age(usage.fetchedAt)}`,
     `last attempt: ${age(usage.attemptAt)}`,
-    `next attempt: ${usage.retryAt === undefined ? 'n/a' : usage.retryAt <= nowMs ? 'due' : `in ${formatDuration((usage.retryAt - nowMs) / 1000)}`}`,
+    `next attempt: ${diagnosticNextAttempt(usage, nowMs, intervalMinutes)}`,
     `windows: ${usage.windows.length ? usage.windows.map((w) => `${w.id} ${Math.round(w.usedPercent)}%`).join(', ') : 'none'}`,
     `subscription: ${usage.subscription ?? 'n/a'}`,
     `login ends: ${usage.loginExpiresAt === undefined ? 'n/a' : usage.loginExpiresAt <= nowMs ? 'passed' : `in ${formatDuration((usage.loginExpiresAt - nowMs) / 1000)}`}`,
   ].join('\n');
+}
+
+/**
+ * 1.2.7: the HTTP answer of the latest read: the code a failure names, 200 for a good live read, "no answer (reason)" for a
+ * failure without one (network, timeout, a renewal), n/a when no read happened (numbers from the cache or a session log).
+ */
+function diagnosticHttpStatus(usage: ProviderUsage): string {
+  const code = usageHttpStatus(usage.error);
+  if (code !== undefined) return String(code);
+  if (usage.error) return `no answer (${usage.error})`;
+  if (usage.status === 'ok' && usage.source === 'live') return '200';
+  return 'n/a';
+}
+
+/**
+ * 1.2.7: when the account is read next: a hold's end (after a failure or a refusal), else the next regular read (the last
+ * attempt plus the read interval), "due" once that time passed, n/a without either.
+ */
+function diagnosticNextAttempt(usage: ProviderUsage, nowMs: number, intervalMinutes?: number): string {
+  const at = (ms: number, what: string) => (ms <= nowMs ? `due (${what})` : `in ${formatDuration((ms - nowMs) / 1000)} (${what})`);
+  if (usage.retryAt !== undefined) return at(usage.retryAt, 'after the hold');
+  if (intervalMinutes !== undefined && intervalMinutes > 0) {
+    const last = usage.attemptAt ?? usage.fetchedAt;
+    return at(last + intervalMinutes * 60_000, `regular read every ${intervalMinutes} min`);
+  }
+  return 'n/a';
 }
 
 /** 1.2.6: how long before the stored login ends the card warns ("Sign in again in 5 d 12 h"). */

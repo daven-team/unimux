@@ -80,11 +80,23 @@ describe('failure reasons', () => {
     expect(text).toContain('http status: 429');
     expect(text).toContain('last good data 15 min ago');
     expect(text).toContain('last attempt: 1 min ago');
-    expect(text).toContain('next attempt: in 9 min');
+    expect(text).toContain('next attempt: in 9 min (after the hold)');
     expect(text).toContain('7d 100%');
     expect(text).not.toContain('example.com');
     expect(text).toContain('renewal: held (cswap)');
     expect(usageDiagnostics({ ...usage, heldBy: undefined, active: true }, NOW, 'a')).toContain('active login: yes');
+ 
+  });
+
+  it('names the HTTP answer and the next regular read of a good account (1.2.7)', () => {
+    const ok: ProviderUsage = { accountId: 'claude:main', provider: 'claude', status: 'ok', windows: [], fetchedAt: NOW - 2 * 60_000, source: 'live', attemptAt: NOW - 2 * 60_000 };
+    const text = usageDiagnostics(ok, NOW, 'claude main', 5);
+    expect(text).toContain('http status: 200');
+    expect(text).toContain('next attempt: in 3 min (regular read every 5 min)');
+    expect(usageDiagnostics({ ...ok, attemptAt: NOW - 6 * 60_000 }, NOW, 'a', 5)).toContain('next attempt: due (regular read every 5 min)');
+    expect(usageDiagnostics(ok, NOW, 'a')).toContain('next attempt: n/a');
+    expect(usageDiagnostics({ ...ok, status: 'error', error: 'network', source: 'cache' }, NOW, 'a')).toContain('http status: no answer (network)');
+    expect(usageDiagnostics({ ...ok, source: 'cache' }, NOW, 'a')).toContain('http status: n/a');
   });
 });
 
