@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LOGIN_END_WARN_MS, cardState, unpaidSubscription, loginEndNotice, makeMainOffered, removedCardKey, summaryAccounts, usageDiagnostics, withoutRemovedCards, type ProviderUsage } from '../src/shared/usage';
+import { LOGIN_END_WARN_MS, cardState, orgTag, unpaidSubscription, loginEndNotice, makeMainOffered, removedCardKey, summaryAccounts, usageDiagnostics, withoutRemovedCards, type ProviderUsage } from '../src/shared/usage';
 import { usageMessages } from '../src/shared/usageMessages';
 import { translate } from '../src/shared/i18n';
 
@@ -85,5 +85,19 @@ describe('the end of a stored login (1.2.6)', () => {
       for (const language of ['en', 'de', 'es', 'fr', 'pt'] as const) expect(translate(language, key, { time: '5 d 12 h' })).not.toBe(key);
     }
     expect(translate('en', 'Zaloguj ponownie za {time}', { time: '5 d 12 h' })).toBe('Sign in again within 5 d 12 h');
+  });
+});
+
+describe('the organisation beside a shared e-mail (1.2.7)', () => {
+  it('names the organisation only when another card has the same e-mail', () => {
+    const personal = card({ accountId: 'claude:r1', email: 'A@x.io', org: 'Personal' });
+    const team = card({ accountId: 'claude:r2', email: 'a@x.io ', org: 'Acme Team' });
+    const other = card({ accountId: 'claude:r3', email: 'b@x.io', org: 'B org' });
+    const cards = [personal, team, other];
+    expect(orgTag(personal, cards)).toBe('Personal');
+    expect(orgTag(team, cards)).toBe('Acme Team');
+    expect(orgTag(other, cards)).toBeUndefined();
+    expect(orgTag({ ...team, org: undefined }, cards)).toBeUndefined();
+    expect(orgTag(personal, [personal])).toBeUndefined();
   });
 });

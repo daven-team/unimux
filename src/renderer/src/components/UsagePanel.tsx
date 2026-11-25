@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { updateSettings } from '../../../shared/state';
 import type { AccountNotice, LoginTarget } from '../../../shared/accounts';
-import { adoptCopyOffered, cardState, claudeLoginActions, diagnosticLabel, effectivePercent, formatDuration, loginEndNotice, makeMainOffered, unpaidSubscription, shortAccountName, shortDuration, summaryAccounts, usageBand, usageDiagnostics, usageErrorKind, usageSummary, withoutRemovedCards, removedCardKey, type ProviderUsage, type SetAsideAccount, type UsageProvider, type UsageWindow } from '../../../shared/usage';
+import { adoptCopyOffered, cardState, claudeLoginActions, diagnosticLabel, effectivePercent, formatDuration, loginEndNotice, makeMainOffered, orgTag, unpaidSubscription, shortAccountName, shortDuration, summaryAccounts, usageBand, usageDiagnostics, usageErrorKind, usageSummary, withoutRemovedCards, removedCardKey, type ProviderUsage, type SetAsideAccount, type UsageProvider, type UsageWindow } from '../../../shared/usage';
 import { cswapNoteText, noticeText, setAsideText, usageErrorKey } from '../../../shared/usageMessages';
 import { useI18n } from '../i18n';
 import { swapErrorKey, swapErrorText } from '../../../shared/swapMessages';
@@ -134,7 +134,7 @@ function useRemovedCards(): [string[], (next: string[]) => void] {
   return [removed, save];
 }
 
-function AccountCard({ usage, now, language, showMain, savedIndex, swapping, onMakeMain, onSwitchBest, onRemoveCard }: {
+function AccountCard({ usage, now, language, showMain, savedIndex, swapping, onMakeMain, onSwitchBest, onRemoveCard, org }: {
   usage: ProviderUsage; now: number; language: string; showMain: boolean;
   /** 1.2.5: takes the card of an expired main login off the panel (the login itself is not the app's to delete). */
   onRemoveCard?: (usage: ProviderUsage) => void;
@@ -144,6 +144,8 @@ function AccountCard({ usage, now, language, showMain, savedIndex, swapping, onM
   swapping: string | null; onMakeMain: (usage: ProviderUsage) => void;
   /** 1.1.2: on the main card, when another saved account of its provider exists: switch to the one with the most room. */
   onSwitchBest?: () => void;
+  /** 1.2.7: the organisation beside the e-mail, when another card has the same e-mail (`orgTag`). */
+  org?: string;
 }) {
   const { tr } = useI18n();
   const busy = swapping !== null;
@@ -287,6 +289,7 @@ function AccountCard({ usage, now, language, showMain, savedIndex, swapping, onM
       <div className="usage-card-head">
         <ProviderIcon provider={usage.provider} />
         <span className="usage-account" title={name}>{name}</span>
+        {org && <span className="usage-org" title={org}>{org}</span>}
         {usage.plan && <span className="usage-chip">{usage.plan}</span>}
         {showMain && usage.active && <span className="usage-chip main">{tr('główne')}</span>}
         {swapping === usage.accountId && (
@@ -622,7 +625,7 @@ export function UsagePanel() {
           <AccountNotices notices={notices} setAside={setAside} copies={duplicateCopies} readOnlyPath={accountsReadOnly} />
           {visible.length ? (
             <>
-              {visible.map((usage) => <AccountCard key={usage.accountId} usage={usage} savedIndex={visible.filter((u) => u.managed && u.provider === usage.provider).indexOf(usage) + 1} now={now} language={language} showMain={(usage.provider === 'claude' ? claudeCount : codexCount) > 1} swapping={swapping} onMakeMain={(target) => void makeMain(target)} onRemoveCard={(target) => setRemovedCards([...removedCards, removedCardKey(target)])} {...(switchOffered(usage) ? { onSwitchBest: () => void switchBest(usage.provider) } : {})} />)}
+              {visible.map((usage) => <AccountCard key={usage.accountId} usage={usage} savedIndex={visible.filter((u) => u.managed && u.provider === usage.provider).indexOf(usage) + 1} org={orgTag(usage, visible)} now={now} language={language} showMain={(usage.provider === 'claude' ? claudeCount : codexCount) > 1} swapping={swapping} onMakeMain={(target) => void makeMain(target)} onRemoveCard={(target) => setRemovedCards([...removedCards, removedCardKey(target)])} {...(switchOffered(usage) ? { onSwitchBest: () => void switchBest(usage.provider) } : {})} />)}
               {updated && <p className="usage-note">{tr('Zaktualizowano {time}', { time: updated })}</p>}
             </>
           ) : (

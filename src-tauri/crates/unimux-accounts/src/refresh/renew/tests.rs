@@ -87,6 +87,7 @@ fn deps(fetch: Arc<Fake>) -> RefreshDeps {
         user_agent: None,
         limits: None,
         random: Some(Arc::new(|| 0.0)),
+        live_refresh_token: None,
     }
 }
 
@@ -431,4 +432,63 @@ async fn never_returns_or_leaves_tokens_in_temporary_files() {
     let out = fx.refresh(&deps(f)).await;
     assert!(!format!("{out:?}").contains("secret-new"));
     assert!(fx.temps().is_empty());
+}
+
+/// 1.2.7 (claude-swap 1.2.0): a refresh token the live login also holds is never sent (renewing it would leave Claude Code
+/// on a spent token); a live login that cannot be read for certain defers the renewal; another or no live login lets it go.
+#[tokio::test]
+async fn never_renews_a_grant_the_live_login_also_holds() {
+    let ok = || {
+        fake(|_| {
+            async { reply(200, json!({ "access_token": "new-access", "refresh_token": "new-refresh", "expires_in": 3600 })) }
+                .boxed()
+        })
+    };
+    let with_live =
+        |f: Arc<Fake>, live: LiveToken| RefreshDeps { live_refresh_token: Some(Arc::new(move || live.clone())), ..deps(f) };
+
+    let fx = Fx::new();
+    fx.write(&profile());
+    let f = ok();
+    assert_eq!(fx.refresh(&with_live(f.clone(), LiveToken::Token("old-refresh".into()))).await, t(LIVE_LOGIN, None));
+    assert_eq!(f.calls.load(Ordering::SeqCst), 0, "nothing is sent");
+    assert_eq!(js_json::stringify(&fx.read()), js_json::stringify(&profile()), "the copy is untouched");
+
+    assert_eq!(fx.refresh(&with_live(f.clone(), LiveToken::Unknown)).await, t("live-unknown", None));
+    assert_eq!(f.calls.load(Ordering::SeqCst), 0, "an unreadable live login defers, nothing is sent");
+
+    assert_eq!(fx.refresh(&with_live(f.clone(), LiveToken::Token("someone-else".into()))).await, RefreshOutcome::Ok);
+    assert_eq!(f.calls.load(Ordering::SeqCst), 1);
+
+    let fx = Fx::new();
+    fx.write(&profile());
+    let f = ok();
+    assert_eq!(fx.refresh(&with_live(f.clone(), LiveToken::Absent)).await, RefreshOutcome::Ok);
+    assert_eq!(f.calls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn reads_the_live_refresh_token_and_tells_absent_from_unknown() {
+    use crate::live::live_refresh_token;
+    use std::io;
+    let home = Path::new("/home/u");
+    let file = |text: &'static str| move |_: &Path| -> io::Result<String> { Ok(text.to_string()) };
+    assert_eq!(
+        live_refresh_token(None, home, &mut file(r#"{"claudeAiOauth":{"refreshToken":"r1"}}"#)),
+        LiveToken::Token("r1".into())
+    );
+    assert_eq!(live_refresh_token(None, home, &mut file(r#"{"claudeAiOauth":{"refreshToken":""}}"#)), LiveToken::Absent);
+    assert_eq!(live_refresh_token(None, home, &mut file(r#"{"other":1}"#)), LiveToken::Absent);
+    assert_eq!(live_refresh_token(None, home, &mut file("not json")), LiveToken::Unknown);
+    assert_eq!(live_refresh_token(None, home, &mut |_| Err(io::Error::from(io::ErrorKind::NotFound))), LiveToken::Absent);
+    assert_eq!(
+        live_refresh_token(None, home, &mut |_| Err(io::Error::from(io::ErrorKind::PermissionDenied))),
+        LiveToken::Unknown
+    );
+    let mut seen = PathBuf::new();
+    live_refresh_token(Some("/cfg"), home, &mut |p| {
+        seen = p.to_path_buf();
+        Err(io::Error::from(io::ErrorKind::NotFound))
+    });
+    assert_eq!(seen, Path::new("/cfg").join(".credentials.json"));
 }

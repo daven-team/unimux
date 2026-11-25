@@ -57,6 +57,7 @@ async fn a_renewal_sends_exactly_the_token_headers_and_stores_the_rotated_tokens
         user_agent: Some("unimux/1.2.0".into()),
         limits: None,
         random: None,
+        live_refresh_token: None,
     };
     assert_eq!(renewer.refresh(dir.path(), &deps).await, RefreshOutcome::Ok);
     let (head, body) = server.await.unwrap();

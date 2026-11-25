@@ -48,6 +48,20 @@ impl TokenFetch for HttpClient {
 
 pub type AsyncDelay = Arc<dyn Fn(Duration) -> BoxFuture<'static, ()> + Send + Sync>;
 
+/// 1.2.7 (claude-swap 1.2.0's live-login gate): what the live Claude login holds right now.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LiveToken {
+    /// No live login file, or one without a refresh token.
+    Absent,
+    /// The live login's refresh token.
+    Token(String),
+    /// The live login could not be read for certain (a read error, a file that does not parse).
+    Unknown,
+}
+
+/// The reason of a renewal declined because the live login holds this very refresh token.
+pub const LIVE_LOGIN: &str = "live-login";
+
 /// `RefreshDeps`.
 #[derive(Clone)]
 pub struct RefreshDeps {
@@ -63,6 +77,9 @@ pub struct RefreshDeps {
     pub limits: Option<Arc<RefreshLimits>>,
     /// `Math.random` for the jitter (tests fix it).
     pub random: Option<Arc<dyn Fn() -> f64 + Send + Sync>>,
+    /// 1.2.7: reads the live login's refresh token. A grant the live login also holds is Claude Code's to renew: renewing
+    /// it here would leave Claude Code on a spent refresh token. Without it no such check is made.
+    pub live_refresh_token: Option<Arc<dyn Fn() -> LiveToken + Send + Sync>>,
 }
 
 impl RefreshDeps {
@@ -191,6 +208,16 @@ async fn run(dir: &Path, deps: &RefreshDeps) -> RefreshOutcome {
         && h.until > (deps.now)()
     {
         return transient("http-429", Some(h.until - (deps.now)()));
+    }
+    // 1.2.7 (claude-swap 1.2.0): never POST a refresh token the live login also holds (the identity rule misses it when
+    // `~/.claude.json` names another account than the live credentials belong to, e.g. in the middle of a switch). When the
+    // live login cannot be read for certain, the renewal waits for the next pass: nothing is spent.
+    if let Some(live) = &deps.live_refresh_token {
+        match live() {
+            LiveToken::Token(t) if t == token => return transient(LIVE_LOGIN, None),
+            LiveToken::Unknown => return transient("live-unknown", None),
+            _ => {}
+        }
     }
     let url = deps.token_url.as_deref().unwrap_or(OAUTH_TOKEN_URL);
     let ua = deps.user_agent.as_deref().unwrap_or(REFRESH_USER_AGENT);

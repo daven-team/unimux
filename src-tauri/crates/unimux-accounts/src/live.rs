@@ -26,6 +26,30 @@ fn credentials_path(config_dir: Option<&str>, home: &Path) -> PathBuf {
     }
 }
 
+/// 1.2.7: the live login's refresh token (`<CLAUDE_CONFIG_DIR or ~/.claude>/.credentials.json`) for the renewal's
+/// live-login gate. A missing file or one without a refresh token is `Absent`; a read error or a file that does not parse
+/// is `Unknown`.
+pub fn live_refresh_token(
+    config_dir: Option<&str>,
+    home: &Path,
+    read: &mut dyn FnMut(&Path) -> io::Result<String>,
+) -> crate::refresh::renew::LiveToken {
+    use crate::refresh::renew::LiveToken;
+    let raw = match read(&credentials_path(config_dir, home)) {
+        Ok(raw) => raw,
+        Err(e) if matches!(e.kind(), io::ErrorKind::NotFound | io::ErrorKind::NotADirectory) => return LiveToken::Absent,
+        Err(_) => return LiveToken::Unknown,
+    };
+    match js_json::parse(&raw) {
+        Ok(Value::Object(m)) => js::record(m.get("claudeAiOauth"))
+            .and_then(|o| o.get("refreshToken"))
+            .and_then(Value::as_str)
+            .filter(|t| !t.is_empty())
+            .map_or(LiveToken::Absent, |t| LiveToken::Token(t.to_string())),
+        _ => LiveToken::Unknown,
+    }
+}
+
 /// `claudeLoginPresence`: whether a Claude login is stored next to the config (the environment token counts as one). A file
 /// that cannot be read right now or does not parse is `Unknown`.
 pub fn claude_login_presence(

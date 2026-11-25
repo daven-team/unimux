@@ -179,6 +179,17 @@ impl ClaudeAccounts {
     }
 
     pub fn refresh_deps(&self) -> RefreshDeps {
+        // 1.2.7: the live login's refresh token for the renewal's live-login gate. macOS keeps the live login in the Keychain,
+        // which is not read here (the identity rule still guards there).
+        let live_refresh_token: Option<Arc<dyn Fn() -> crate::refresh::renew::LiveToken + Send + Sync>> = if self.cfg.darwin {
+            None
+        } else {
+            let config_dir = env_get(&self.env, "CLAUDE_CONFIG_DIR").map(str::to_string);
+            let home = self.cfg.home.clone();
+            Some(Arc::new(move || {
+                crate::live::live_refresh_token(config_dir.as_deref(), &home, &mut |p| crate::js::read_text(p))
+            }))
+        };
         RefreshDeps {
             fetch: self.cfg.fetch.clone(),
             now: Arc::new(now_ms),
@@ -187,6 +198,7 @@ impl ClaudeAccounts {
             user_agent: Some(self.cfg.user_agent.clone()),
             limits: Some(self.limits.clone()),
             random: None,
+            live_refresh_token,
         }
     }
 

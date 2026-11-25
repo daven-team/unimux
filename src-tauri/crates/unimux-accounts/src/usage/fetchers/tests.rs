@@ -298,6 +298,16 @@ async fn a_saved_profile_is_renewed_on_401_and_on_expiry_only_when_allowed() {
     );
     f.renew_with(RefreshOutcome::Dead, None);
     assert_eq!(fetch_claude(&f.deps, &saved(RenewRule::Allowed)).await.usage.error.as_deref(), Some("refresh-dead"));
+    // 1.2.7: the renewal declined because the live login holds this very grant: held by the live login, not an error.
+    f.renew_with(
+        RefreshOutcome::Transient(Some(TransientDetail {
+            reason: crate::refresh::renew::LIVE_LOGIN.into(),
+            retry_after_ms: None,
+        })),
+        None,
+    );
+    let r = fetch_claude(&f.deps, &saved(RenewRule::Allowed)).await;
+    assert_eq!((r.usage.status, r.usage.held_by, r.usage.error.as_deref()), (Status::Elsewhere, Some(HeldBy::Live), None));
 }
 
 #[tokio::test]

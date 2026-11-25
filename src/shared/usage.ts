@@ -180,6 +180,16 @@ export function shortAccountName(email: string | undefined, fallback: string, ma
  */
 export type CardState = 'ok' | 'stale' | 'expired' | 'unavailable' | 'apiKey' | 'lapsed' | 'denied';
 
+/**
+ * 1.2.7 (claude-swap 1.2.0's `[org]` tag): the organisation name a card shows beside its e-mail, only when another card has
+ * the same e-mail (case-insensitive), e.g. a personal Max and a Team seat on one address; undefined otherwise.
+ */
+export function orgTag(usage: Pick<ProviderUsage, 'accountId' | 'email' | 'org'>, cards: Pick<ProviderUsage, 'accountId' | 'email'>[]): string | undefined {
+  const email = usage.email?.trim().toLowerCase();
+  if (!email || !usage.org) return undefined;
+  return cards.some((c) => c.accountId !== usage.accountId && c.email?.trim().toLowerCase() === email) ? usage.org : undefined;
+}
+
 export function cardState(usage: Pick<ProviderUsage, 'status' | 'windows' | 'source' | 'heldBy'>): CardState {
   if (usage.status === 'apiKey') return 'apiKey';
   if (usage.status === 'expired') return 'expired';

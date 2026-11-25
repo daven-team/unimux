@@ -17,7 +17,7 @@ use super::credentials::{
 };
 use super::parse::{parse_claude_usage, parse_codex_plan, parse_codex_rate_limits};
 use super::subscription::parse_profile;
-use super::types::{Provider, ProviderUsage, Source, Status, held_by_of};
+use super::types::{HeldBy, Provider, ProviderUsage, Source, Status, held_by_of};
 use crate::identity::AccountIdentity;
 use crate::refresh::RefreshOutcome;
 use crate::refresh::renew::TokenFetch;
@@ -164,6 +164,12 @@ pub async fn fetch_claude(deps: &FetcherDeps, r: &AccountRef) -> FetchResult {
             match refresh(&config_dir).await {
                 RefreshOutcome::Dead => Err(FetchResult::of(with(&known, Status::Expired, Some("refresh-dead")))),
                 RefreshOutcome::Unusable => Err(FetchResult::of(with(&known, Status::Expired, Some("refresh-unusable")))),
+                // 1.2.7: the live login holds this very grant: Claude Code renews it, like a copy held by the live login.
+                RefreshOutcome::Transient(Some(d)) if d.reason == crate::refresh::renew::LIVE_LOGIN => {
+                    let mut u = with(&known, Status::Elsewhere, None);
+                    u.held_by = Some(HeldBy::Live);
+                    Err(FetchResult::of(u))
+                }
                 RefreshOutcome::Transient(detail) => {
                     let reason = detail.as_ref().map_or("failed", |d| d.reason.as_str());
                     let retry = detail.as_ref().and_then(|d| d.retry_after_ms).map(|ms| ms as f64);
